@@ -52,18 +52,29 @@ def init_db(db_path=None):
             skills TEXT NOT NULL,
             interests TEXT NOT NULL,
             career_goal TEXT,
+            hours_per_week INTEGER DEFAULT 10,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+
+    # Lightweight migration: databases created before the career-path feature
+    # do not have hours_per_week, so add it instead of asking the user to
+    # delete their existing career_system.db file.
+    cursor.execute("PRAGMA table_info(users);")
+    existing_columns = {row["name"] for row in cursor.fetchall()}
+    if "hours_per_week" not in existing_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN hours_per_week INTEGER DEFAULT 10;")
 
     conn.commit()
     conn.close()
 
 
-def create_user(name, education, skills, interests, career_goal=None, db_path=None):
+def create_user(name, education, skills, interests, career_goal=None,
+                hours_per_week=10, db_path=None):
     """
     Inserts a new user profile into SQLite.
     Skills and interests lists are converted to JSON strings for storage.
+    hours_per_week is the study pace used to estimate career path duration.
     Returns the newly created user as a dictionary.
     """
     # Ensure skills and interests are lists
@@ -79,13 +90,18 @@ def create_user(name, education, skills, interests, career_goal=None, db_path=No
     clean_education = education.strip() if education else ""
     clean_career_goal = career_goal.strip() if career_goal else ""
 
+    try:
+        clean_hours = int(hours_per_week)
+    except (TypeError, ValueError):
+        clean_hours = 10
+
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
 
     cursor.execute("""
-        INSERT INTO users (name, education, skills, interests, career_goal)
-        VALUES (?, ?, ?, ?, ?)
-    """, (clean_name, clean_education, skills_json, interests_json, clean_career_goal))
+        INSERT INTO users (name, education, skills, interests, career_goal, hours_per_week)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (clean_name, clean_education, skills_json, interests_json, clean_career_goal, clean_hours))
 
     conn.commit()
     user_id = cursor.lastrowid
@@ -135,6 +151,10 @@ def format_user_row(row):
     except Exception:
         interests = []
 
+    # hours_per_week is absent in databases created before the migration
+    row_keys = row.keys()
+    hours_per_week = row["hours_per_week"] if "hours_per_week" in row_keys else 10
+
     return {
         "id": row["id"],
         "name": row["name"],
@@ -142,5 +162,6 @@ def format_user_row(row):
         "skills": skills,
         "interests": interests,
         "career_goal": row["career_goal"] or "",
+        "hours_per_week": hours_per_week or 10,
         "created_at": str(row["created_at"])
     }

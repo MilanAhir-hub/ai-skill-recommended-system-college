@@ -128,6 +128,103 @@ def run_verification():
     print(f"Recommend Invalid User -> Status: {res_err3.status_code}, Msg: {res_err3.get_json()['message']}")
     assert res_err3.status_code == 404
 
+    # -------------------------------------------------------------
+    # 8. Knowledge base integrity & size
+    # -------------------------------------------------------------
+    print_step("8. Testing GET /api/stats (Knowledge Base Integrity)")
+    res = client.get("/api/stats")
+    stats_data = res.get_json()
+    kb = stats_data["knowledge_base"]
+    print(f"Careers            : {kb['total_careers']}")
+    print(f"Skills             : {kb['total_skills']}")
+    print(f"Skill aliases      : {kb['total_skill_aliases']}")
+    print(f"Career path stages : {kb['total_career_stages']}")
+    print(f"Roadmap steps      : {kb['total_roadmap_steps']}")
+    print(f"Consistency issues : {stats_data['consistency_problems']}")
+    print("\nMost in-demand skills across all careers:")
+    for item in stats_data["most_in_demand_skills"][:6]:
+        print(f" - {item['skill']}: required by {item['required_by']} careers ({item['difficulty']})")
+    assert res.status_code == 200
+    assert stats_data["consistency_problems"] == [], "Knowledge base has consistency problems"
+
+    # -------------------------------------------------------------
+    # 9. Skill catalog
+    # -------------------------------------------------------------
+    print_step("9. Testing GET /api/skills (Skill Catalog)")
+    res = client.get("/api/skills")
+    skills_data = res.get_json()
+    print(f"Total skills: {skills_data['total_skills']} across {len(skills_data['categories'])} categories")
+    for category, skills in list(skills_data["categories"].items())[:5]:
+        print(f" - {category}: {len(skills)} skills")
+    assert res.status_code == 200
+
+    # -------------------------------------------------------------
+    # 10. Generated career path detail
+    # -------------------------------------------------------------
+    print_step(f"10. Testing POST /api/career-path/{user_id}/ai_ml_engineer (Career Path)")
+    res = client.post(f"/api/career-path/{user_id}/ai_ml_engineer", json={"hours_per_week": 12})
+    assert res.status_code == 200
+    evaluation = res.get_json()["evaluation"]
+    path = evaluation["career_path"]
+    plan = path["learning_plan"]
+
+    print(f"Career          : {evaluation['career_title']} ({evaluation['matching_score']}% fit)")
+    print(f"Readiness       : {path['readiness']['level']} ({path['readiness']['skill_coverage_percentage']}% coverage)")
+    print(f"Skills to learn : {plan['total_skills_to_learn']} ({plan['total_learning_hours']} hrs, {plan['estimated_duration']})")
+    print(f"Bridge skills   : {plan['bridge_skills']}")
+    print("\nGenerated learning phases:")
+    for phase in plan["phases"]:
+        skills = ", ".join(s["skill"] for s in phase["skills"]) or "portfolio & interview work"
+        print(f" {phase['name']} (weeks {phase['starts_week']}-{phase['ends_week']}): {skills}")
+
+    print("\nRole progression ladder:")
+    for stage in path["progression_ladder"]:
+        print(f" Stage {stage['stage']} [{stage['status']}] {stage['role']} | {stage['experience']} | {stage['salary_inr']}")
+
+    print("\nImmediate next actions:")
+    for action in path["next_actions"]:
+        print(f" - {action}")
+
+    # Verify the plan never schedules a skill before its prerequisites
+    import career_data
+    sequence = plan["skill_sequence"]
+    position = {skill: index for index, skill in enumerate(sequence)}
+    for skill in sequence:
+        for prereq in career_data.get_skill_meta(skill)["prerequisites"]:
+            if prereq in position:
+                assert position[prereq] < position[skill], (
+                    f"{prereq} must come before {skill}"
+                )
+    print("\nPrerequisite ordering verified for the full skill sequence.")
+
+    # -------------------------------------------------------------
+    # 11. Career comparison & stateless analysis
+    # -------------------------------------------------------------
+    print_step(f"11. Testing POST /api/compare/{user_id} and POST /api/analyze")
+    res = client.post(
+        f"/api/compare/{user_id}",
+        json={"career_ids": ["data_analyst", "data_scientist", "ai_ml_engineer"]}
+    )
+    assert res.status_code == 200
+    print("Comparison results:")
+    for item in res.get_json()["comparisons"]:
+        print(f" - {item['career_title']}: {item['matching_score']}% fit, "
+              f"{item['skill_gap_summary']['missing_count']} gaps, "
+              f"{item['career_path']['learning_plan']['estimated_duration']}")
+
+    res = client.post("/api/analyze", json={
+        "name": "Guest Student",
+        "education": "BCA",
+        "skills": ["html", "css", "js"],
+        "interests": ["Frontend Development"],
+        "top_n": 3
+    })
+    assert res.status_code == 200
+    analyze_data = res.get_json()
+    print(f"\nStateless analysis (saved={analyze_data['saved']}) using skill aliases html/css/js:")
+    for item in analyze_data["recommendations"]:
+        print(f" - {item['career_title']}: {item['matching_score']}% | matched {item['matched_skills']}")
+
     print_step("ALL VERIFICATION CHECKS PASSED SUCCESSFULLY!")
 
 

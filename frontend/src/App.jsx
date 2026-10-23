@@ -90,7 +90,7 @@ export default function App() {
                 CareerCompass AI
               </span>
               <span className="text-[#8e8b82] text-[11px] font-mono">
-                v1.0
+                v2.0
               </span>
             </div>
 
@@ -123,7 +123,7 @@ export default function App() {
               AI-Powered Personalized Career and Skill Recommendation System • College Project
             </p>
             <p className="font-mono text-[10px]">
-              Rule-Based Expert Heuristics (50% Skills • 30% Interests • 20% Education)
+              Rule-Based Expert Heuristics (50% Skills • 30% Interests • 20% Education) + Prerequisite Graph Paths
             </p>
           </div>
 

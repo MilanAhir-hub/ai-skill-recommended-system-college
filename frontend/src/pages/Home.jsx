@@ -2,132 +2,207 @@
  * pages/Home.jsx
  * --------------
  * Claude-inspired warm editorial landing page for CareerCompass AI.
- * Cream canvas (#faf9f5), Newsreader serif typography, coral CTAs (#cc785c),
- * light cream feature cards (#efe9de), and dark product surfaces (#181715).
+ * The hero counters, career catalog and in-demand skill list are all read
+ * live from the backend knowledge base, so the page always reflects the
+ * real contents of career_data.py instead of a hardcoded summary.
  */
-
-import React from 'react';
-import { 
-  ArrowRight, 
-  Check, 
-  Cpu, 
-  Target, 
-  BookOpen, 
-  Sparkles, 
-  ShieldCheck, 
-  BarChart3, 
-  Code2, 
-  Globe,
-  Sliders
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  ArrowRight,
+  Check,
+  Cpu,
+  Target,
+  Sparkles,
+  Sliders,
+  Route,
+  GitBranch,
+  CalendarClock,
+  TrendingUp,
+  Flame,
+  IndianRupee,
+  Search,
+  Layers
 } from 'lucide-react';
+import { fetchKnowledgeBaseStats, fetchCareersCatalog } from '../services/api';
+
+/* Fallback counters so the page still reads correctly offline */
+const FALLBACK_STATS = {
+  total_careers: 21,
+  total_skills: 92,
+  total_career_stages: 105,
+  total_roadmap_steps: 294,
+  total_skill_aliases: 242
+};
+
+const PIPELINE = [
+  {
+    number: '01',
+    title: 'Describe what you can do',
+    desc: 'Pick your degree, the skills you already have and the work that genuinely interests you. Short forms like "js" or "ml" are understood.',
+    icon: <Target className="w-5 h-5 text-[#cc785c]" />
+  },
+  {
+    number: '02',
+    title: 'Weighted scoring across every track',
+    desc: 'Each career is scored on 50% skills, 30% interests and 20% education, with must-have skills counted double so a critical gap actually shows.',
+    icon: <Sliders className="w-5 h-5 text-[#cc785c]" />
+  },
+  {
+    number: '03',
+    title: 'Prerequisite graph traversal',
+    desc: 'Your gaps are closed over a dependency graph, so JavaScript is never scheduled after React and missing prerequisites are pulled in automatically.',
+    icon: <GitBranch className="w-5 h-5 text-[#cc785c]" />
+  },
+  {
+    number: '04',
+    title: 'A dated career path, not a list',
+    desc: 'Skills are grouped into phases with week ranges from your study pace, then mapped onto a five-stage role ladder with salary bands.',
+    icon: <Route className="w-5 h-5 text-[#cc785c]" />
+  }
+];
 
 export default function Home({ onGetStarted }) {
-  const steps = [
-    {
-      number: '01',
-      title: 'Define Competency Profile',
-      desc: 'Enter your academic degree, select skills you have acquired, and specify your authentic career interests.',
-      icon: <Target className="w-5 h-5 text-[#cc785c]" />
-    },
-    {
-      number: '02',
-      title: 'Heuristic Rule-Based Matching',
-      desc: 'Our explainable expert system evaluates your profile using 50% skill, 30% interest, and 20% education weights.',
-      icon: <Sliders className="w-5 h-5 text-[#cc785c]" />
-    },
-    {
-      number: '03',
-      title: 'Actionable Skill Roadmaps',
-      desc: 'Inspect exact gaps between your skillset and target careers, with structured milestones to master missing skills.',
-      icon: <BookOpen className="w-5 h-5 text-[#cc785c]" />
-    }
-  ];
+  const [stats, setStats] = useState(FALLBACK_STATS);
+  const [topSkills, setTopSkills] = useState([]);
+  const [careers, setCareers] = useState([]);
+  const [activeCategory, setActiveCategory] = useState('All');
+  const [query, setQuery] = useState('');
 
-  const tracks = [
-    { title: 'Software Developer', icon: <Code2 className="w-4 h-4 text-[#cc785c]" />, skills: 'Python, Java, DSA, Git, SQL' },
-    { title: 'Web Developer', icon: <Globe className="w-4 h-4 text-[#5db8a6]" />, skills: 'HTML, CSS, React, Node.js, Git' },
-    { title: 'Data Analyst', icon: <BarChart3 className="w-4 h-4 text-[#e8a55a]" />, skills: 'Python, SQL, Excel, Power BI, Statistics' },
-    { title: 'AI/ML Engineer', icon: <Cpu className="w-4 h-4 text-[#cc785c]" />, skills: 'Python, ML, Deep Learning, Mathematics' },
-    { title: 'Cybersecurity Analyst', icon: <ShieldCheck className="w-4 h-4 text-[#5db8a6]" />, skills: 'Network Security, Linux, Cryptography, SIEM' },
+  useEffect(() => {
+    let isMounted = true;
+
+    fetchKnowledgeBaseStats()
+      .then((data) => {
+        if (!isMounted) return;
+        if (data?.knowledge_base) setStats(data.knowledge_base);
+        if (data?.most_in_demand_skills) setTopSkills(data.most_in_demand_skills.slice(0, 10));
+      })
+      .catch((err) => console.warn('Stats unavailable, using fallback counters:', err.message));
+
+    fetchCareersCatalog({ view: 'summary' })
+      .then((data) => {
+        if (isMounted && data?.careers) setCareers(data.careers);
+      })
+      .catch((err) => console.warn('Career catalog unavailable:', err.message));
+
+    return () => { isMounted = false; };
+  }, []);
+
+  const categories = useMemo(
+    () => ['All', ...Array.from(new Set(careers.map((c) => c.category))).sort()],
+    [careers]
+  );
+
+  const visibleCareers = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return careers.filter((career) => {
+      const matchesCategory = activeCategory === 'All' || career.category === activeCategory;
+      const matchesQuery =
+        !needle ||
+        career.title.toLowerCase().includes(needle) ||
+        career.required_skills.some((skill) => skill.toLowerCase().includes(needle));
+      return matchesCategory && matchesQuery;
+    });
+  }, [careers, activeCategory, query]);
+
+  const counters = [
+    { value: stats.total_careers, label: 'Career tracks' },
+    { value: stats.total_skills, label: 'Skills mapped' },
+    { value: stats.total_career_stages, label: 'Role stages' },
+    { value: stats.total_roadmap_steps, label: 'Roadmap steps' }
   ];
 
   return (
     <div className="space-y-20 py-10 sm:py-16">
-      
+
       {/* Hero Section */}
       <section className="text-center max-w-4xl mx-auto px-4 space-y-6">
-        
-        {/* Category Pill Tag */}
+
         <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-medium bg-[#efe9de] text-[#141413] border border-[#e6dfd8] shadow-2xs">
           <Sparkles className="w-3.5 h-3.5 text-[#cc785c]" />
           <span>Explainable Rule-Based Career Intelligence</span>
         </div>
 
-        {/* Editorial Serif Heading */}
         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-editorial font-normal text-[#141413] tracking-tight leading-[1.08] max-w-3xl mx-auto">
-          Discover your ideal career path with <span className="text-[#cc785c] italic">clarity & purpose.</span>
+          Get a career path with <span className="text-[#cc785c] italic">dates on it,</span> not just advice.
         </h1>
 
-        {/* Subtitle */}
         <p className="text-base sm:text-lg text-[#6c6a64] max-w-2xl mx-auto leading-relaxed">
-          A personalized career guidance system combining transparent heuristic scoring with 
-          concrete skill gap analysis. No black-box algorithms — just explainable guidance.
+          Tell the system what you already know. It scores you against every career track, finds the
+          exact gaps, orders them by what depends on what, and turns them into phased weeks you can
+          actually start on Monday.
         </p>
 
-        {/* CTA Buttons */}
         <div className="pt-3 flex flex-col sm:flex-row items-center justify-center gap-3">
           <button
             onClick={onGetStarted}
             className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3 rounded-lg font-medium text-sm text-white bg-[#cc785c] hover:bg-[#a9583e] active:bg-[#8f4730] transition-colors shadow-xs cursor-pointer"
           >
-            <span>Find My Career</span>
+            <span>Generate My Career Path</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Trust Points */}
-        <div className="pt-3 flex flex-wrap items-center justify-center gap-6 text-xs text-[#8e8b82]">
+        {/* Live knowledge base counters */}
+        <div className="pt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl mx-auto">
+          {counters.map((counter) => (
+            <div
+              key={counter.label}
+              className="bg-white border border-[#e6dfd8] rounded-xl px-3 py-4 shadow-2xs"
+            >
+              <div className="text-2xl sm:text-3xl font-editorial text-[#141413] leading-none">
+                {counter.value}
+              </div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#8e8b82] mt-1.5">
+                {counter.label}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="pt-2 flex flex-wrap items-center justify-center gap-5 text-xs text-[#8e8b82]">
           <span className="flex items-center gap-1.5">
             <Check className="w-3.5 h-3.5 text-[#5db872] stroke-[2.5]" />
-            50% Skill • 30% Interest • 20% Education
+            50% skills - 30% interests - 20% education
           </span>
           <span className="flex items-center gap-1.5">
             <Check className="w-3.5 h-3.5 text-[#5db872] stroke-[2.5]" />
-            Deterministic Heuristic Model
+            No trained model, no API keys
           </span>
           <span className="flex items-center gap-1.5">
             <Check className="w-3.5 h-3.5 text-[#5db872] stroke-[2.5]" />
-            Full Skill Roadmap Generation
+            Same input, same output - every time
           </span>
         </div>
 
       </section>
 
-      {/* 3-Step Process (Cream Cards) */}
+      {/* 4-Step Pipeline */}
       <section className="max-w-6xl mx-auto px-4">
         <div className="text-center mb-10 space-y-2">
           <h2 className="text-3xl font-editorial font-normal text-[#141413]">
-            How the System Works
+            How your path gets generated
           </h2>
-          <p className="text-xs text-[#6c6a64] max-w-md mx-auto">
-            A transparent 3-step evaluation model based on standard industry competency frameworks.
+          <p className="text-xs text-[#6c6a64] max-w-lg mx-auto leading-relaxed">
+            Four deterministic stages. Every number the dashboard shows you can be traced back to a
+            rule in the knowledge base.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {steps.map((step) => (
-            <div 
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+          {PIPELINE.map((step) => (
+            <div
               key={step.number}
-              className="bg-[#efe9de] p-7 sm:p-8 rounded-xl border border-[#e6dfd8] space-y-4 relative overflow-hidden"
+              className="bg-[#efe9de] p-6 rounded-xl border border-[#e6dfd8] space-y-3.5 relative overflow-hidden"
             >
-              <div className="text-3xl font-editorial text-[#d6cbbe] absolute top-5 right-6 select-none font-normal">
+              <div className="text-3xl font-editorial text-[#d6cbbe] absolute top-4 right-5 select-none font-normal">
                 {step.number}
               </div>
               <div className="w-10 h-10 rounded-lg bg-[#faf9f5] flex items-center justify-center border border-[#e6dfd8]">
                 {step.icon}
               </div>
               <div>
-                <h3 className="text-lg font-editorial font-normal text-[#141413] mb-1.5">
+                <h3 className="text-base font-editorial font-normal text-[#141413] mb-1.5 leading-snug">
                   {step.title}
                 </h3>
                 <p className="text-xs text-[#6c6a64] leading-relaxed">
@@ -139,46 +214,187 @@ export default function Home({ onGetStarted }) {
         </div>
       </section>
 
-      {/* Supported Career Pathways (Dark Product Chrome) */}
+      {/* What you actually get */}
+      <section className="max-w-6xl mx-auto px-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          {[
+            {
+              icon: <CalendarClock className="w-5 h-5 text-[#cc785c]" />,
+              title: 'A phased timeline',
+              desc: 'Foundations, core role skills, specialisation and portfolio work - each with week ranges computed from the hours you can genuinely study.'
+            },
+            {
+              icon: <TrendingUp className="w-5 h-5 text-[#cc785c]" />,
+              title: 'Where the career goes',
+              desc: 'A five-stage ladder per track, from the entry role to architect or head of function, with experience ranges and indicative Indian salary bands.'
+            },
+            {
+              icon: <Cpu className="w-5 h-5 text-[#cc785c]" />,
+              title: 'Reasons, not a black box',
+              desc: 'Every score shows its skill, interest and education components, which skills were credited as prerequisites, and why each gap was sequenced where it is.'
+            }
+          ].map((item) => (
+            <div key={item.title} className="bg-white border border-[#e6dfd8] rounded-xl p-6 space-y-3 shadow-2xs">
+              <div className="w-10 h-10 rounded-lg bg-[#efe9de] flex items-center justify-center border border-[#e6dfd8]">
+                {item.icon}
+              </div>
+              <h3 className="text-lg font-editorial font-normal text-[#141413]">{item.title}</h3>
+              <p className="text-xs text-[#6c6a64] leading-relaxed">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Most in-demand skills, straight from the knowledge base */}
+      {topSkills.length > 0 && (
+        <section className="max-w-6xl mx-auto px-4">
+          <div className="bg-white border border-[#e6dfd8] rounded-2xl p-6 sm:p-8 shadow-2xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-mono text-[#cc785c] uppercase tracking-wider flex items-center gap-1.5">
+                  <Flame className="w-3.5 h-3.5" />
+                  Highest leverage skills
+                </span>
+                <h3 className="text-2xl font-editorial font-normal text-[#141413]">
+                  Learn these and many doors open at once
+                </h3>
+                <p className="text-xs text-[#6c6a64] leading-relaxed max-w-xl">
+                  Counted directly from how many of the {stats.total_careers} tracks require each skill - useful when you
+                  have not picked a direction yet.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {topSkills.map((item) => (
+                <div
+                  key={item.skill}
+                  className="flex items-center gap-3 bg-[#faf9f5] border border-[#e6dfd8] rounded-lg px-3 py-2.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold text-[#141413] truncate">{item.skill}</div>
+                    <div className="text-[10px] text-[#8e8b82] font-mono">
+                      {item.difficulty} - about {item.learning_hours} hrs
+                    </div>
+                  </div>
+                  <div className="shrink-0 w-28">
+                    <div className="w-full bg-[#efe9de] h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#cc785c] rounded-full"
+                        style={{ width: `${(item.required_by / stats.total_careers) * 100}%` }}
+                      />
+                    </div>
+                    <div className="text-[10px] font-mono text-[#8e8b82] mt-1 text-right">
+                      {item.required_by} / {stats.total_careers} roles
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Career catalog (Dark Product Chrome) */}
       <section className="max-w-6xl mx-auto px-4 pb-4">
-        <div className="bg-[#181715] text-[#faf9f5] rounded-2xl p-8 sm:p-10 border border-[#252320] shadow-sm">
-          
-          <div className="max-w-xl mb-8 space-y-1.5">
-            <span className="text-[11px] font-mono text-[#cc785c] uppercase tracking-wider">
-              Domain Competency Catalog
-            </span>
-            <h3 className="text-2xl font-editorial font-normal text-[#faf9f5]">
-              Curated Technical Career Tracks
-            </h3>
-            <p className="text-xs text-[#a09d96] leading-relaxed">
-              Every track defines required proficiencies, foundational degrees, and prerequisite frameworks.
-            </p>
+        <div className="bg-[#181715] text-[#faf9f5] rounded-2xl p-6 sm:p-10 border border-[#252320] shadow-sm">
+
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 mb-7">
+            <div className="max-w-xl space-y-1.5">
+              <span className="text-[11px] font-mono text-[#cc785c] uppercase tracking-wider">
+                Domain Competency Catalog
+              </span>
+              <h3 className="text-2xl font-editorial font-normal text-[#faf9f5]">
+                {stats.total_careers} career tracks, each fully mapped
+              </h3>
+              <p className="text-xs text-[#a09d96] leading-relaxed">
+                Every track defines its benchmark skills, must-have subset, accepted degrees, entry salary
+                band and a five-stage role ladder.
+              </p>
+            </div>
+
+            <div className="relative w-full lg:w-72">
+              <Search className="w-4 h-4 text-[#8e8b82] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search a career or skill..."
+                className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-[#252320] bg-[#1f1e1b] text-xs text-[#faf9f5] placeholder:text-[#6c6a64] focus:outline-hidden focus:border-[#cc785c] transition-colors"
+              />
+            </div>
           </div>
 
+          {/* Category filter */}
+          {categories.length > 1 && (
+            <div className="flex flex-wrap gap-1.5 mb-5">
+              {categories.map((category) => (
+                <button
+                  key={category}
+                  onClick={() => setActiveCategory(category)}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors cursor-pointer ${
+                    activeCategory === category
+                      ? 'bg-[#cc785c] text-white border-[#cc785c]'
+                      : 'bg-[#1f1e1b] text-[#a09d96] border-[#252320] hover:border-[#383531] hover:text-[#faf9f5]'
+                  }`}
+                >
+                  {category}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {tracks.map((track) => (
-              <div 
-                key={track.title}
-                className="bg-[#1f1e1b] border border-[#252320] p-4 rounded-xl flex items-start gap-3.5 hover:border-[#383531] transition-colors"
+            {visibleCareers.map((career) => (
+              <div
+                key={career.id}
+                className="bg-[#1f1e1b] border border-[#252320] p-4 rounded-xl hover:border-[#383531] transition-colors flex flex-col gap-2.5"
               >
-                <div className="p-2 rounded-lg bg-[#252320] shrink-0 mt-0.5">
-                  {track.icon}
-                </div>
-                <div>
-                  <h4 className="font-medium text-sm text-[#faf9f5] mb-1">
-                    {track.title}
+                <div className="flex items-start justify-between gap-2">
+                  <h4 className="font-medium text-sm text-[#faf9f5] leading-snug">
+                    {career.title}
                   </h4>
-                  <p className="text-xs text-[#a09d96] font-mono text-[11px]">
-                    {track.skills}
-                  </p>
+                  {career.demand && (
+                    <span className="text-[10px] font-mono text-[#cc785c] shrink-0 mt-0.5">
+                      {career.demand}
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-[11px] text-[#a09d96] font-mono leading-relaxed">
+                  {career.required_skills.slice(0, 5).join(', ')}
+                  {career.required_skills.length > 5 && ` +${career.required_skills.length - 5}`}
+                </p>
+
+                <div className="mt-auto pt-2 border-t border-[#252320] flex items-center justify-between text-[10px] text-[#8e8b82] font-mono">
+                  <span className="inline-flex items-center gap-1">
+                    <IndianRupee className="w-3 h-3" />
+                    {career.entry_salary_inr}
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <Layers className="w-3 h-3" />
+                    {career.total_stages} stages
+                  </span>
                 </div>
               </div>
             ))}
           </div>
 
+          {visibleCareers.length === 0 && careers.length > 0 && (
+            <p className="text-xs text-[#a09d96] italic py-6 text-center">
+              No track matches "{query}". Try a skill name like "python" or "figma".
+            </p>
+          )}
+
+          {careers.length === 0 && (
+            <p className="text-xs text-[#a09d96] italic py-6 text-center">
+              Start the Flask backend to load the live career catalog.
+            </p>
+          )}
+
           <div className="mt-8 pt-6 border-t border-[#252320] flex flex-col sm:flex-row items-center justify-between gap-4">
             <p className="text-xs text-[#a09d96]">
-              Ready to evaluate your profile against all 5 tracks?
+              Ready to see which of these {stats.total_careers} tracks fits you, and exactly how to get there?
             </p>
             <button
               onClick={onGetStarted}
@@ -188,10 +404,8 @@ export default function Home({ onGetStarted }) {
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
-
         </div>
       </section>
-
     </div>
   );
 }
