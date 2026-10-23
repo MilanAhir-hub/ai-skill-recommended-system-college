@@ -389,6 +389,38 @@ class CareerRecommendationApiTestCase(unittest.TestCase):
         self.assertEqual(res.status_code, 405)
         self.assertEqual(res.get_json()["status"], "error")
 
+    def test_ai_algo_in_recommendations(self):
+        """Verify POST /api/recommend/<id> includes ai_algo details and human-friendly explanation."""
+        payload = {
+            "name": "Dev Test",
+            "education": "B.Tech in Computer Science",
+            "skills": ["Python", "SQL"],
+            "interests": ["Data Analysis"]
+        }
+        create_res = self.client.post(
+            "/api/users",
+            data=json.dumps(payload),
+            content_type="application/json"
+        )
+        user_id = create_res.get_json()["user"]["id"]
+
+        rec_res = self.client.post(f"/api/recommend/{user_id}")
+        self.assertEqual(rec_res.status_code, 200)
+        data = rec_res.get_json()
+
+        # Check top-level ai_algo
+        self.assertIn("ai_algo", data)
+        self.assertIn("name", data["ai_algo"])
+        self.assertIn("Rule-Based", data["ai_algo"]["name"])
+        self.assertIn("steps", data["ai_algo"])
+        self.assertGreaterEqual(len(data["ai_algo"]["steps"]), 5)
+
+        # Check career-level ai_algo_breakdown
+        top_rec = data["recommendations"][0]
+        self.assertIn("ai_algo_breakdown", top_rec)
+        self.assertIn("bullets", top_rec["ai_algo_breakdown"])
+        self.assertGreaterEqual(len(top_rec["ai_algo_breakdown"]["bullets"]), 4)
+
 
 if __name__ == "__main__":
     unittest.main()

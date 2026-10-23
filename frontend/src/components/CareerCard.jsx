@@ -14,9 +14,10 @@ import {
   Target, 
   Check, 
   Terminal, 
-  ArrowRight,
-  Sparkles,
-  BookOpen
+  ArrowRight, 
+  Sparkles, 
+  BookOpen,
+  Cpu
 } from 'lucide-react';
 import SkillList from './SkillList';
 
@@ -28,6 +29,12 @@ export default function CareerCard({ career, rank = 1 }) {
   const roadmap = career.learning_roadmap || {};
   const missingSkills = career.missing_skills || [];
   const matchedSkills = career.matched_skills || [];
+
+  const algoBullets = career.ai_algo_breakdown?.bullets || [
+    `Skill Matching: Identified ${matchedSkills.length} acquired strength(s) (${breakdown.skill_match_percentage ?? 0}%) and predicted ${missingSkills.length} missing skill(s) for this track.`,
+    `Multi-Factor Scoring: Combined 50% Skill Match + 30% Interest Match (${breakdown.interest_match_percentage ?? 0}%) + 20% Education (${breakdown.education_match_percentage ?? 0}%).`,
+    `Roadmap Synthesis: Outlined step-by-step milestones to help acquire missing competencies.`
+  ];
 
   // Determine progress bar and badge accent
   const isTopRank = rank === 1;
@@ -122,6 +129,27 @@ export default function CareerCard({ career, rank = 1 }) {
               {breakdown.education_match_percentage ?? 0}%
             </div>
           </div>
+        </div>
+
+        {/* AI Algo Analysis Box for This Career */}
+        <div className="bg-[#faf9f5] rounded-xl border border-[#e6dfd8] p-4 mb-6 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#cc785c] flex items-center gap-1.5">
+              <Cpu className="w-3.5 h-3.5 text-[#cc785c]" />
+              AI Algo:- Skill Gap & Heuristic Match
+            </span>
+            <span className="text-[10px] font-mono font-medium text-[#8e8b82]">
+              {score}% Match
+            </span>
+          </div>
+          <ul className="text-xs text-[#55534e] space-y-1.5 pl-0.5">
+            {algoBullets.map((bullet, bIdx) => (
+              <li key={bIdx} className="flex items-start gap-2 leading-relaxed">
+                <span className="text-[#cc785c] font-bold shrink-0 mt-0.5">•</span>
+                <span>{bullet}</span>
+              </li>
+            ))}
+          </ul>
         </div>
 
         {/* Recommended Education Notice */}

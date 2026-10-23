@@ -16,11 +16,44 @@ import {
   Target, 
   Check,
   Sliders,
-  Sparkles
+  Sparkles,
+  Cpu
 } from 'lucide-react';
 import { fetchRecommendations } from '../services/api';
 import CareerCard from '../components/CareerCard';
 import Loading from '../components/Loading';
+
+const DEFAULT_AI_ALGO = {
+  name: "Rule-Based Expert System (Weighted Multi-Criteria Decision Analysis)",
+  short_name: "Rule-Based Expert System & MCDA",
+  description: "An explainable heuristic algorithm that analyzes competencies, interests, and academic background to predict optimal career pathways and identify skill gaps.",
+  steps: [
+    {
+      title: "Profile Normalization",
+      desc: "Standardized entered skills, interests, and education into uniform tokens for case-insensitive benchmark matching."
+    },
+    {
+      title: "Skill Gap Analysis (50% Weight)",
+      desc: "Compared your acquired skills against industry benchmark skillsets to identify matched competencies and missing skill gaps."
+    },
+    {
+      title: "Interest Alignment (30% Weight)",
+      desc: "Measured semantic overlap between your personal interests and daily career domain focus areas."
+    },
+    {
+      title: "Education Compatibility (20% Weight)",
+      desc: "Evaluated your degree and coursework against recommended academic prerequisites."
+    },
+    {
+      title: "Score Prediction & Ranking",
+      desc: "Aggregated the weighted factors into a unified 0–100% fit score to predict and rank your top career matches."
+    },
+    {
+      title: "Roadmap Generation",
+      desc: "Synthesized actionable, milestone-based learning steps from the knowledge base for all identified missing skills."
+    }
+  ]
+};
 
 export default function Dashboard({ 
   userId, 
@@ -29,6 +62,7 @@ export default function Dashboard({
   onGoHome 
 }) {
   const [recommendations, setRecommendations] = useState([]);
+  const [aiAlgoInfo, setAiAlgoInfo] = useState(DEFAULT_AI_ALGO);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [metaInfo, setMetaInfo] = useState(null);
@@ -45,6 +79,7 @@ export default function Dashboard({
     try {
       const response = await fetchRecommendations(userId);
       setRecommendations(response.recommendations || []);
+      setAiAlgoInfo(response.ai_algo || DEFAULT_AI_ALGO);
       setMetaInfo({
         userName: response.user_name || userProfile?.name || 'Student',
         education: response.user_education || userProfile?.education || '',
@@ -204,6 +239,58 @@ export default function Dashboard({
           <span className="font-mono text-[11px] text-[#8e8b82]">
             Deterministic Rule-Based Engine
           </span>
+        </div>
+      </div>
+
+      {/* AI Algo Explanation Section - Placed right after the analyses overview */}
+      <div className="bg-white rounded-xl border border-[#e6dfd8] p-6 sm:p-8 shadow-2xs space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#e6dfd8]">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-[#efe9de] text-[#cc785c] flex items-center justify-center shrink-0 border border-[#e6dfd8] mt-0.5 sm:mt-0">
+              <Cpu className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-[#cc785c] bg-[#f5f0e8] px-2.5 py-1 rounded-md border border-[#e6dfd8]">
+                  AI Algo:-
+                </span>
+                <h2 className="text-xl sm:text-2xl font-editorial font-normal text-[#141413]">
+                  {aiAlgoInfo?.name || DEFAULT_AI_ALGO.name}
+                </h2>
+              </div>
+              <p className="text-xs text-[#6c6a64] mt-1 leading-relaxed">
+                {aiAlgoInfo?.description || DEFAULT_AI_ALGO.description}
+              </p>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-medium bg-[#faf9f5] text-[#8e8b82] border border-[#e6dfd8] shrink-0 self-start sm:self-auto">
+            <Sparkles className="w-3.5 h-3.5 text-[#cc785c]" />
+            Explainable AI
+          </span>
+        </div>
+
+        {/* Short, accurate, human-friendly bullet points */}
+        <div className="space-y-3">
+          <p className="text-xs font-semibold text-[#141413] flex items-center gap-1.5">
+            <Sliders className="w-3.5 h-3.5 text-[#cc785c]" />
+            How the algorithm analyzed and predicted your skills & career matches:
+          </p>
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-0.5">
+            {(aiAlgoInfo?.steps || DEFAULT_AI_ALGO.steps).map((step, idx) => (
+              <li 
+                key={idx}
+                className="flex items-start gap-3 p-3.5 rounded-lg bg-[#faf9f5] border border-[#e6dfd8]/80 hover:border-[#cc785c]/40 transition-colors"
+              >
+                <span className="w-5 h-5 rounded-full bg-[#efe9de] text-[#cc785c] font-mono text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                  {idx + 1}
+                </span>
+                <div className="text-xs leading-relaxed text-[#3d3d3a]">
+                  <strong className="text-[#141413] font-semibold">{step.title}: </strong>
+                  <span>{step.desc}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
 

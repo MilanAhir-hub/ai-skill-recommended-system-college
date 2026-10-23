@@ -137,8 +137,14 @@ All scores are bounded between `0.0` and `100.0`. Missing or empty fields are ha
 For each recommended career, the system identifies the difference between the career's requirements and the user's current skillset:
 $$\text{Missing Skills} = \text{Required Skills} - \text{User Skills}$$
 
-### 5. Learning Roadmap Generation
-For every missing skill, the system retrieves a predefined 3-step learning path from `SKILL_ROADMAPS` (covering fundamentals, practical application, and portfolio project creation).
+### 6. AI Algorithm Explainability (`AI Algo:-`)
+Immediately following the recommendation analysis, the application presents an **`AI Algo:-`** transparency card and per-career breakdown explaining how the prediction was computed in simple, human-friendly bullet points:
+- **Profile Normalization:** Standardizes skills, interests, and degrees into clean tokens.
+- **Skill Gap Analysis (50% Impact):** Compares user competencies with industry benchmarks to identify matched strengths and missing gaps.
+- **Interest Alignment (30% Impact):** Evaluates semantic overlap between authentic interests and role domain focus areas.
+- **Education Compatibility (20% Impact):** Matches academic degree against domain prerequisites.
+- **Score Calculation & Ranking:** Aggregates weighted criteria into a 0–100% fit score and ranks the top career paths.
+- **Roadmap Synthesis:** Constructs sequential milestones for every missing skill.
 
 ---
 
@@ -150,7 +156,7 @@ For every missing skill, the system retrieves a predefined 3-step learning path 
 | `GET` | `/api/careers` | List available careers and required skills |
 | `POST` | `/api/users` | Create and save user profile in SQLite |
 | `GET` | `/api/users/<id>` | Retrieve saved profile by ID |
-| `POST` | `/api/recommend/<id>` | Generate top 3 recommendations, missing skills & roadmap |
+| `POST` | `/api/recommend/<id>` | Generate top 3 recommendations, AI Algo breakdown & roadmap |
 
 ### Sample `POST /api/users` Payload
 ```json
@@ -170,6 +176,11 @@ For every missing skill, the system retrieves a predefined 3-step learning path 
   "total_recommendations": 3,
   "user_id": 1,
   "user_name": "Milan Gagiya",
+  "ai_algo": {
+    "name": "Rule-Based Expert System (Weighted Multi-Criteria Decision Analysis)",
+    "description": "An explainable heuristic algorithm that analyzes competencies, interests, and academic background to predict optimal career pathways and identify skill gaps.",
+    "steps": [ ... ]
+  },
   "recommendations": [
     {
       "career_id": "ai_ml_engineer",
@@ -181,6 +192,10 @@ For every missing skill, the system retrieves a predefined 3-step learning path 
         "interest_match_percentage": 75.0,
         "education_match_percentage": 100.0,
         "weights_used": { "skill": "50%", "interest": "30%", "education": "20%" }
+      },
+      "ai_algo_breakdown": {
+        "algorithm": "Rule-Based Skill Gap Analysis & Heuristic MCDA",
+        "bullets": [ ... ]
       },
       "matched_skills": ["Python", "Machine Learning"],
       "missing_skills": ["Deep Learning", "Mathematics", "Statistics", "SQL"],
@@ -195,7 +210,7 @@ For every missing skill, the system retrieves a predefined 3-step learning path 
 ## 📮 How to Test the Application
 
 ### 1. Automated Tests
-Run the 18 automated backend test suites:
+Run the 19 automated backend test suites:
 ```bash
 python -m unittest tests/test_api.py
 ```

@@ -205,6 +205,37 @@ def recommend_for_user(user_id):
         "user_education": user["education"],
         "user_goal": user["career_goal"],
         "total_recommendations": len(recommendations),
+        "ai_algo": {
+            "name": "Rule-Based Expert System (Weighted Multi-Criteria Decision Analysis)",
+            "short_name": "Rule-Based Expert System & MCDA",
+            "description": "An explainable heuristic algorithm that analyzes competencies, interests, and academic background to predict optimal career pathways and identify skill gaps.",
+            "steps": [
+                {
+                    "title": "Profile Normalization",
+                    "desc": "Standardized entered skills, interests, and education into uniform tokens for case-insensitive benchmark matching."
+                },
+                {
+                    "title": "Skill Gap Analysis (50% Weight)",
+                    "desc": "Compared your acquired skills against industry benchmark skillsets to identify matched competencies and missing skill gaps."
+                },
+                {
+                    "title": "Interest Alignment (30% Weight)",
+                    "desc": "Measured semantic overlap between your personal interests and daily career domain focus areas."
+                },
+                {
+                    "title": "Education Compatibility (20% Weight)",
+                    "desc": "Evaluated your degree and coursework against recommended academic prerequisites."
+                },
+                {
+                    "title": "Score Prediction & Ranking",
+                    "desc": "Aggregated the weighted factors into a unified 0–100% fit score to predict and rank your top career matches."
+                },
+                {
+                    "title": "Roadmap Generation",
+                    "desc": "Synthesized actionable, milestone-based learning steps from the knowledge base for all identified missing skills."
+                }
+            ]
+        },
         "recommendations": recommendations
     }), 200
 
