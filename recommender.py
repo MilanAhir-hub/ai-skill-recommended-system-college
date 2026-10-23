@@ -223,6 +223,15 @@ def evaluate_career_for_user(user, career, weights=None):
                 "education": f"{int(education_weight * 100)}%"
             }
         },
+        "ai_algo_breakdown": {
+            "algorithm": "Rule-Based Skill Gap Analysis & Heuristic MCDA",
+            "bullets": [
+                f"Skill Analysis: Identified {len(matched_skills)} matched skill(s) ({round(skill_ratio * 100, 1)}%) and predicted {len(missing_skills)} gap skill(s) out of {len(career['required_skills'])} required for {career['title']}.",
+                f"Interest Alignment: Evaluated {len(matched_interests)} matching domain interest(s) ({round(interest_ratio * 100, 1)}% alignment).",
+                f"Academic Relevance: Evaluated education background against domain requirements ({round(education_ratio * 100, 1)}% match).",
+                f"Weighted Score Prediction: Aggregated 50% skills + 30% interests + 20% education into a final {normalized_score}% match score."
+            ]
+        },
         "matched_skills": matched_skills,
         "missing_skills": missing_skills,
         "matched_interests": matched_interests,
