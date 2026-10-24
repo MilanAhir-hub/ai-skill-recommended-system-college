@@ -7,7 +7,7 @@
  * can generate the path for any career in the knowledge base.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   RotateCcw,
   UserPlus,
@@ -26,9 +26,17 @@ import {
   X,
   Route
 } from 'lucide-react';
-import { fetchRecommendations, fetchCareersCatalog, fetchCareerPath } from '../services/api';
+import {
+  fetchRecommendations,
+  fetchCareersCatalog,
+  fetchCareerPath,
+  fetchAlgorithmCatalog,
+  compareAlgorithms
+} from '../services/api';
 import CareerCard from '../components/CareerCard';
 import CareerPath from '../components/CareerPath';
+import AlgorithmPicker from '../components/AlgorithmPicker';
+import AlgorithmComparison from '../components/AlgorithmComparison';
 import Loading from '../components/Loading';
 
 const DEFAULT_AI_ALGO = {
@@ -92,6 +100,17 @@ export default function Dashboard({
   const [hoursPerWeek, setHoursPerWeek] = useState(userProfile?.hours_per_week || 10);
   const [topN, setTopN] = useState(3);
 
+  // Algorithm choice. The original pair stays selected until the student picks
+  // something else, so the default experience is unchanged.
+  const [algorithmCatalog, setAlgorithmCatalog] = useState(null);
+  const [scoringAlgorithm, setScoringAlgorithm] = useState('mcda');
+  const [pathAlgorithm, setPathAlgorithm] = useState('topological');
+  const [activeAlgorithm, setActiveAlgorithm] = useState(null);
+
+  const [comparison, setComparison] = useState(null);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [comparisonError, setComparisonError] = useState('');
+
   // Career explorer state
   const [catalog, setCatalog] = useState([]);
   const [exploreId, setExploreId] = useState('');
@@ -107,6 +126,8 @@ export default function Dashboard({
 
     const pace = options.hoursPerWeek ?? hoursPerWeek;
     const count = options.topN ?? topN;
+    const scoring = options.scoringAlgorithm ?? scoringAlgorithm;
+    const path = options.pathAlgorithm ?? pathAlgorithm;
 
     setLoading(true);
     setErrorMessage('');
@@ -114,10 +135,13 @@ export default function Dashboard({
     try {
       const response = await fetchRecommendations(userId, {
         hours_per_week: pace,
-        top_n: count
+        top_n: count,
+        scoring_algorithm: scoring,
+        path_algorithm: path
       });
       setRecommendations(response.recommendations || []);
       setAiAlgoInfo(response.ai_algo || DEFAULT_AI_ALGO);
+      setActiveAlgorithm(response.algorithm || null);
       setMetaInfo({
         userName: response.user_name || userProfile?.name || 'Student',
         education: response.user_education || userProfile?.education || '',
@@ -149,8 +173,84 @@ export default function Dashboard({
       .catch(() => {
         /* Explorer is optional; silently skip when the catalog is unavailable */
       });
+
+    fetchAlgorithmCatalog()
+      .then((data) => {
+        if (!isMounted || !data) return;
+        setAlgorithmCatalog(data);
+        if (data.defaults?.scoring) setScoringAlgorithm(data.defaults.scoring);
+        if (data.defaults?.path) setPathAlgorithm(data.defaults.path);
+      })
+      .catch(() => {
+        /* Picker is optional; the backend defaults still apply */
+      });
+
     return () => { isMounted = false; };
   }, []);
+
+  /**
+   * One click switches both algorithms, so the page recalculates once rather
+   * than twice. `combo` carries { scoring, path } ids straight from the
+   * backend catalog.
+   */
+  const handleComboChange = (combo) => {
+    const scoring = combo?.scoring?.id || combo?.scoring;
+    const path = combo?.path?.id || combo?.path;
+    if (!scoring || !path) return;
+    if (scoring === scoringAlgorithm && path === pathAlgorithm) return;
+
+    setScoringAlgorithm(scoring);
+    setPathAlgorithm(path);
+    loadRecommendations({ scoringAlgorithm: scoring, pathAlgorithm: path });
+    if (exploreResult) handleExplore(exploreResult.career_id, hoursPerWeek, path, scoring);
+  };
+
+  /**
+   * The AI Algo card describes whichever combination is actually in use. With
+   * the default pair it shows the engine's own 7-step pipeline; with any other
+   * pair it is rebuilt from the selected algorithms' declared steps, so the
+   * card can never describe an algorithm that did not run.
+   */
+  const algoExplainer = useMemo(() => {
+    const fallback = aiAlgoInfo || DEFAULT_AI_ALGO;
+    if (!activeAlgorithm || activeAlgorithm.using_defaults) return fallback;
+
+    const scoring = activeAlgorithm.scoring || {};
+    const path = activeAlgorithm.path || {};
+
+    return {
+      name: `${scoring.name} + ${path.name}`,
+      description:
+        `${scoring.one_line || ''} ${path.one_line || ''} ` +
+        'Fully deterministic: no trained model and no external AI service is used.',
+      steps: [
+        {
+          title: 'Profile Normalization',
+          desc: 'Standardized entered skills through 242 aliases (js, ml, k8s) into canonical knowledge-base tokens.'
+        },
+        ...(scoring.how_it_works || []).map((desc) => ({ title: scoring.name, desc })),
+        ...(path.how_it_works || []).map((desc) => ({ title: path.name, desc }))
+      ]
+    };
+  }, [activeAlgorithm, aiAlgoInfo]);
+
+  const handleCompareAlgorithms = async () => {
+    if (!userId) return;
+    setComparisonLoading(true);
+    setComparisonError('');
+    try {
+      const response = await compareAlgorithms(userId, {
+        hours_per_week: hoursPerWeek,
+        top_n: Math.min(topN, 3)
+      });
+      setComparison(response.comparison || null);
+    } catch (err) {
+      setComparisonError(err.message || 'Failed to compare the algorithms.');
+      setComparison(null);
+    } finally {
+      setComparisonLoading(false);
+    }
+  };
 
   const handlePaceChange = (value) => {
     const pace = parseInt(value, 10);
@@ -165,7 +265,12 @@ export default function Dashboard({
     loadRecommendations({ topN: count });
   };
 
-  const handleExplore = async (careerId, pace = hoursPerWeek) => {
+  const handleExplore = async (
+    careerId,
+    pace = hoursPerWeek,
+    path = pathAlgorithm,
+    scoring = scoringAlgorithm
+  ) => {
     if (!careerId || !userId) return;
 
     setExploreId(careerId);
@@ -173,7 +278,11 @@ export default function Dashboard({
     setExploreError('');
 
     try {
-      const response = await fetchCareerPath(userId, careerId, { hours_per_week: pace });
+      const response = await fetchCareerPath(userId, careerId, {
+        hours_per_week: pace,
+        scoring_algorithm: scoring,
+        path_algorithm: path
+      });
       setExploreResult(response.evaluation);
     } catch (err) {
       setExploreError(err.message || 'Failed to generate that career path.');
@@ -357,9 +466,13 @@ export default function Dashboard({
 
         <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-[#8e8b82]">
           <div className="flex items-center gap-2">
-            <Sliders className="w-3.5 h-3.5 text-[#cc785c] shrink-0" />
+            <Cpu className="w-3.5 h-3.5 text-[#cc785c] shrink-0" />
             <span>
-              Heuristic weights: <strong className="text-[#141413]">50% skills</strong> + <strong className="text-[#141413]">30% interests</strong> + <strong className="text-[#141413]">20% education</strong>, must-have skills counted double
+              Scoring: <strong className="text-[#141413]">{activeAlgorithm?.scoring?.name || 'Weighted MCDA'}</strong>
+              {' '}&middot; Path: <strong className="text-[#141413]">{activeAlgorithm?.path?.name || 'Topological Sort (Kahn)'}</strong>
+              {activeAlgorithm && !activeAlgorithm.using_defaults && (
+                <span className="ml-1.5 text-[10px] font-semibold text-[#a9583e]">(changed from default)</span>
+              )}
             </span>
           </div>
           <span className="font-mono text-[11px] text-[#8e8b82]">
@@ -368,56 +481,15 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* AI Algo Explanation Section */}
-      <div className="bg-white rounded-xl border border-[#e6dfd8] p-6 sm:p-8 shadow-2xs space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#e6dfd8]">
-          <div className="flex items-start sm:items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-[#efe9de] text-[#cc785c] flex items-center justify-center shrink-0 border border-[#e6dfd8] mt-0.5 sm:mt-0">
-              <Cpu className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-[#cc785c] bg-[#f5f0e8] px-2.5 py-1 rounded-md border border-[#e6dfd8]">
-                  AI Algo:-
-                </span>
-                <h2 className="text-xl sm:text-2xl font-editorial font-normal text-[#141413]">
-                  {aiAlgoInfo?.name || DEFAULT_AI_ALGO.name}
-                </h2>
-              </div>
-              <p className="text-xs text-[#6c6a64] mt-1 leading-relaxed">
-                {aiAlgoInfo?.description || DEFAULT_AI_ALGO.description}
-              </p>
-            </div>
-          </div>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-medium bg-[#faf9f5] text-[#8e8b82] border border-[#e6dfd8] shrink-0 self-start sm:self-auto">
-            <Sparkles className="w-3.5 h-3.5 text-[#cc785c]" />
-            Explainable AI
-          </span>
-        </div>
-
-        <div className="space-y-3">
-          <p className="text-xs font-semibold text-[#141413] flex items-center gap-1.5">
-            <Sliders className="w-3.5 h-3.5 text-[#cc785c]" />
-            How the algorithm scored your profile and generated each career path:
-          </p>
-          <ul className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-0.5">
-            {(aiAlgoInfo?.steps || DEFAULT_AI_ALGO.steps).map((step, idx) => (
-              <li
-                key={idx}
-                className="flex items-start gap-3 p-3.5 rounded-lg bg-[#faf9f5] border border-[#e6dfd8]/80 hover:border-[#cc785c]/40 transition-colors"
-              >
-                <span className="w-5 h-5 rounded-full bg-[#efe9de] text-[#cc785c] font-mono text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-                  {idx + 1}
-                </span>
-                <div className="text-xs leading-relaxed text-[#3d3d3a]">
-                  <strong className="text-[#141413] font-semibold">{step.title}: </strong>
-                  <span>{step.desc}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
+      {/* Algorithm picker */}
+      {algorithmCatalog && (
+        <AlgorithmPicker
+          catalog={algorithmCatalog}
+          scoringAlgorithm={scoringAlgorithm}
+          pathAlgorithm={pathAlgorithm}
+          onChangeCombo={handleComboChange}
+        />
+      )}
 
       {/* Ranked Career Cards */}
       {recommendations.length > 0 ? (
@@ -455,6 +527,17 @@ export default function Dashboard({
           </button>
         </div>
       )}
+
+      {/* If I choose a different algorithm, then what? */}
+      <AlgorithmComparison
+        comparison={comparison}
+        loading={comparisonLoading}
+        error={comparisonError}
+        onRun={handleCompareAlgorithms}
+        activeScoring={scoringAlgorithm}
+        activePath={pathAlgorithm}
+        onChooseCombo={handleComboChange}
+      />
 
       {/* Explore any other career path */}
       {exploreOptions.length > 0 && (
@@ -531,6 +614,57 @@ export default function Dashboard({
           )}
         </div>
       )}
+
+      {/* AI Algo Explanation Section */}
+      <div className="bg-white rounded-xl border border-[#e6dfd8] p-6 sm:p-8 shadow-2xs space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#e6dfd8]">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-[#efe9de] text-[#cc785c] flex items-center justify-center shrink-0 border border-[#e6dfd8] mt-0.5 sm:mt-0">
+              <Cpu className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider text-[#cc785c] bg-[#f5f0e8] px-2.5 py-1 rounded-md border border-[#e6dfd8]">
+                  AI Algo:-
+                </span>
+                <h2 className="text-xl sm:text-2xl font-editorial font-normal text-[#141413]">
+                  {algoExplainer.name}
+                </h2>
+              </div>
+              <p className="text-xs text-[#6c6a64] mt-1 leading-relaxed">
+                {algoExplainer.description}
+              </p>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-medium bg-[#faf9f5] text-[#8e8b82] border border-[#e6dfd8] shrink-0 self-start sm:self-auto">
+            <Sparkles className="w-3.5 h-3.5 text-[#cc785c]" />
+            Explainable AI
+          </span>
+        </div>
+
+        <div className="space-y-3">
+          <p className="text-xs font-semibold text-[#141413] flex items-center gap-1.5">
+            <Sliders className="w-3.5 h-3.5 text-[#cc785c]" />
+            How the algorithm scored your profile and generated each career path:
+          </p>
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-0.5">
+            {(algoExplainer.steps || []).map((step, idx) => (
+              <li
+                key={idx}
+                className="flex items-start gap-3 p-3.5 rounded-lg bg-[#faf9f5] border border-[#e6dfd8]/80 hover:border-[#cc785c]/40 transition-colors"
+              >
+                <span className="w-5 h-5 rounded-full bg-[#efe9de] text-[#cc785c] font-mono text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                  {idx + 1}
+                </span>
+                <div className="text-xs leading-relaxed text-[#3d3d3a]">
+                  <strong className="text-[#141413] font-semibold">{step.title}: </strong>
+                  <span>{step.desc}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
 
     </div>
   );

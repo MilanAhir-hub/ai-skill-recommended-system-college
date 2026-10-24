@@ -55,11 +55,18 @@ from career_data import (
     DIFFICULTY_ORDER,
     PHASE_BLUEPRINT,
     JOB_READINESS_STEPS,
+    ALGORITHM_CATALOG,
+    ALGORITHM_COMBOS,
     canonical_skill,
     get_skill_meta,
     get_career_by_id,
     resolve_goal_to_career_id,
 )
+
+# The optional, selectable algorithms live beside this engine. Importing the
+# module does not change any default: mcda + topological stay in charge unless
+# the caller asks for something else.
+import algorithms
 
 # Readiness bands mapped from weighted skill coverage (0 - 100).
 READINESS_BANDS = [
@@ -453,15 +460,31 @@ def describe_duration(total_hours, hours_per_week):
     }
 
 
-def build_learning_plan(missing_skills, known_skills, career, hours_per_week=DEFAULT_HOURS_PER_WEEK):
+def build_learning_plan(missing_skills, known_skills, career, hours_per_week=DEFAULT_HOURS_PER_WEEK,
+                        path_algorithm=algorithms.DEFAULT_PATH_ALGORITHM):
     """
     Builds the phased learning plan: the core of the generated career path.
     Every phase lists its skills with difficulty, hours, prerequisites,
     resources and roadmap steps, plus its own duration estimate.
+
+    path_algorithm selects how the needed skills are grouped:
+    - "topological" (default, unchanged): Kahn's sort into difficulty phases.
+    - "bfs": breadth-first dependency levels, where everything in a level can
+      be studied in parallel. Both produce the same output shape.
     """
     hours_per_week = clamp_hours_per_week(hours_per_week)
+    path_algorithm = algorithms.resolve_path_algorithm(path_algorithm)
 
     needed, bridge_skills = expand_missing_with_prerequisites(missing_skills, known_skills)
+
+    # --- Alternative path algorithm: breadth-first dependency levels ---
+    if path_algorithm == "bfs":
+        return algorithms.build_bfs_learning_plan(
+            needed, bridge_skills, known_skills, career,
+            hours_per_week, missing_skills
+        )
+
+    # --- Original path algorithm: topological sort into difficulty phases ---
     ordered = order_skills_by_prerequisites(needed, known_skills)
     phase_of = assign_skills_to_phases(ordered)
 
@@ -554,6 +577,7 @@ def build_learning_plan(missing_skills, known_skills, career, hours_per_week=DEF
     priority = [ordered[i] for i in priority]
 
     return {
+        "algorithm": "topological",
         "hours_per_week": hours_per_week,
         "total_skills_to_learn": len(ordered),
         "skill_sequence": ordered,
@@ -629,7 +653,8 @@ def build_progression_ladder(career, known_skills, readiness):
 
 def generate_career_path(career, user, matched_skills, missing_skills,
                          missing_core_skills, skill_ratio,
-                         hours_per_week=DEFAULT_HOURS_PER_WEEK):
+                         hours_per_week=DEFAULT_HOURS_PER_WEEK,
+                         path_algorithm=algorithms.DEFAULT_PATH_ALGORITHM):
     """
     Full career path for one career: readiness, phased learning plan, role
     progression ladder, market context and the immediate next actions.
@@ -639,7 +664,9 @@ def generate_career_path(career, user, matched_skills, missing_skills,
     known_skills |= set(matched_skills)
 
     readiness = determine_readiness(skill_ratio, missing_core_skills)
-    learning_plan = build_learning_plan(missing_skills, known_skills, career, hours_per_week)
+    learning_plan = build_learning_plan(
+        missing_skills, known_skills, career, hours_per_week, path_algorithm
+    )
     ladder = build_progression_ladder(career, known_skills, readiness)
 
     # Immediate, concrete next actions derived from the plan.
@@ -710,9 +737,83 @@ def generate_roadmap(missing_skills):
 
 
 # ==========================================
+# 4b. Shared evidence collection (used by every scoring algorithm)
+# ==========================================
+def collect_evidence(user, career):
+    """
+    Measures one career against the normalised profile. Every scoring
+    algorithm consumes the same evidence, so a difference in their output is a
+    difference in reasoning, never a difference in the input they saw.
+    """
+    (skill_ratio, matched_skills, missing_skills,
+     missing_core_skills, implied_matches) = calculate_skill_match(
+        user.get("skills", []), career["required_skills"], career.get("core_skills")
+    )
+    interest_ratio, matched_interests = calculate_interest_match(
+        user.get("interests", []), career["relevant_interests"]
+    )
+    education_ratio = calculate_education_match(user.get("education", ""), career)
+    goal_match = check_goal_match(user.get("career_goal", ""), career)
+
+    effective_skills, _ = canonicalize_user_skills(user.get("skills", []))
+    effective_skills |= infer_implied_skills(effective_skills)
+
+    return {
+        "career_id": career["id"],
+        "skill_ratio": skill_ratio,
+        "matched_skills": matched_skills,
+        "missing_skills": missing_skills,
+        "missing_core_skills": missing_core_skills,
+        "implied_matches": implied_matches,
+        "interest_ratio": interest_ratio,
+        "matched_interests": matched_interests,
+        "education_ratio": education_ratio,
+        "goal_match": goal_match,
+        "goal_bonus": GOAL_BONUS_POINTS if goal_match else 0.0,
+        "effective_skills": effective_skills
+    }
+
+
+def build_request_context(user, scoring_algorithm, careers=None):
+    """
+    Precomputes everything a scoring algorithm needs across the whole career
+    set, once per request:
+    - the decision tree is walked once, not once per career
+    - Bayes posteriors must be normalised over all careers, so every career's
+      evidence is gathered before any score is produced
+    """
+    if careers is None:
+        careers = CAREER_DATABASE
+
+    scoring_algorithm = algorithms.resolve_scoring_algorithm(scoring_algorithm)
+    context = {"scoring_algorithm": scoring_algorithm, "evidence": {}}
+
+    if scoring_algorithm == "mcda":
+        return context
+
+    for career in careers:
+        context["evidence"][career["id"]] = collect_evidence(user, career)
+
+    if scoring_algorithm == "decision_tree":
+        known_skills, _ = canonicalize_user_skills(user.get("skills", []))
+        known_skills |= infer_implied_skills(known_skills)
+        context["traversal"] = algorithms.traverse_decision_tree(
+            user.get("interests", []), known_skills
+        )
+
+    if scoring_algorithm == "bayes":
+        context["posteriors"] = algorithms.bayes_posteriors(context["evidence"], careers)
+
+    return context
+
+
+# ==========================================
 # 5. Scoring one career
 # ==========================================
-def evaluate_career_for_user(user, career, weights=None, hours_per_week=DEFAULT_HOURS_PER_WEEK):
+def evaluate_career_for_user(user, career, weights=None, hours_per_week=DEFAULT_HOURS_PER_WEEK,
+                             scoring_algorithm=algorithms.DEFAULT_SCORING_ALGORITHM,
+                             path_algorithm=algorithms.DEFAULT_PATH_ALGORITHM,
+                             context=None):
     """
     Calculates the matching score, skill gap analysis and generated career path
     for one career.
@@ -722,9 +823,21 @@ def evaluate_career_for_user(user, career, weights=None, hours_per_week=DEFAULT_
     - career: dict from CAREER_DATABASE
     - weights: dict of weights, defaults to MATCH_WEIGHTS
     - hours_per_week: study pace used for the career path duration estimates
+    - scoring_algorithm: "mcda" (default), "decision_tree" or "bayes"
+    - path_algorithm: "topological" (default) or "bfs"
+    - context: precomputed request context from build_request_context
+
+    The original MCDA score is always computed and reported, whichever
+    algorithm is selected, so the alternatives can be compared against the
+    baseline without a second request.
     """
     if weights is None:
         weights = MATCH_WEIGHTS
+
+    scoring_algorithm = algorithms.resolve_scoring_algorithm(scoring_algorithm)
+    path_algorithm = algorithms.resolve_path_algorithm(path_algorithm)
+    if context is None or context.get("scoring_algorithm") != scoring_algorithm:
+        context = build_request_context(user, scoring_algorithm)
 
     user_skills = user.get("skills", [])
     user_interests = user.get("interests", [])
@@ -761,13 +874,45 @@ def evaluate_career_for_user(user, career, weights=None, hours_per_week=DEFAULT_
     is_goal_match = check_goal_match(user_goal, career)
     goal_bonus = GOAL_BONUS_POINTS if is_goal_match else 0.0
 
-    normalized_score = round(max(0.0, min(100.0, base_score + goal_bonus)), 2)
+    mcda_score = round(max(0.0, min(100.0, base_score + goal_bonus)), 2)
+    normalized_score = mcda_score
 
-    # 6. Roadmap + full generated career path
+    # 6. Selected scoring algorithm. MCDA above is always computed; when another
+    #    algorithm is chosen it produces the headline score instead, and the
+    #    MCDA figure stays available as the reference baseline.
+    scoring_info = algorithms.algorithm_info(scoring_algorithm, "scoring")
+    algorithm_detail = {
+        "explanation": [
+            "Weighted criteria: {0}% skills + {1}% interests + {2}% education.".format(
+                int(skill_weight * 100), int(interest_weight * 100), int(education_weight * 100)
+            ),
+            "Core skills counted at {0}x against supporting skills.".format(int(CORE_SKILL_WEIGHT)),
+            "Base {0}%{1} gives the final fit score.".format(
+                round(base_score, 2),
+                " plus a {0}-point goal bonus".format(int(goal_bonus)) if goal_bonus else ""
+            )
+        ]
+    }
+
+    if scoring_algorithm == "decision_tree":
+        evidence = context["evidence"].get(career["id"]) or collect_evidence(user, career)
+        tree_result = algorithms.score_decision_tree(career, evidence, context["traversal"])
+        normalized_score = tree_result["score"]
+        algorithm_detail = tree_result
+
+    elif scoring_algorithm == "bayes":
+        posterior = context.get("posteriors", {}).get(career["id"])
+        if posterior is None:
+            evidence = context["evidence"].get(career["id"]) or collect_evidence(user, career)
+            posterior = algorithms.bayes_posteriors({career["id"]: evidence}, [career])[career["id"]]
+        normalized_score = posterior["score"]
+        algorithm_detail = posterior
+
+    # 7. Roadmap + full generated career path
     roadmap = generate_roadmap(missing_skills)
     career_path = generate_career_path(
         career, user, matched_skills, missing_skills,
-        missing_core_skills, skill_ratio, hours_per_week
+        missing_core_skills, skill_ratio, hours_per_week, path_algorithm
     )
 
     learning_plan = career_path["learning_plan"]
@@ -780,6 +925,26 @@ def evaluate_career_for_user(user, career, weights=None, hours_per_week=DEFAULT_
         "description": career["description"],
         "recommended_education": career["recommended_education"],
         "matching_score": normalized_score,
+        "algorithm": {
+            "scoring": {
+                "id": scoring_algorithm,
+                "name": scoring_info["name"] if scoring_info else scoring_algorithm,
+                "family": scoring_info["family"] if scoring_info else "",
+                "score_label": scoring_info["score_label"] if scoring_info else "Score",
+                "score_scale": scoring_info["score_scale"] if scoring_info else "",
+                "detail": algorithm_detail
+            },
+            "path": {
+                "id": path_algorithm,
+                "name": (algorithms.algorithm_info(path_algorithm, "path") or {}).get("name", path_algorithm),
+                "phase_label": (algorithms.algorithm_info(path_algorithm, "path") or {}).get("phase_label", "Phase")
+            },
+            "mcda_reference_score": mcda_score,
+            "is_default_algorithm": (
+                scoring_algorithm == algorithms.DEFAULT_SCORING_ALGORITHM
+                and path_algorithm == algorithms.DEFAULT_PATH_ALGORITHM
+            )
+        },
         "score_breakdown": {
             "skill_match_percentage": round(skill_ratio * 100, 2),
             "interest_match_percentage": round(interest_ratio * 100, 2),
@@ -845,7 +1010,9 @@ def evaluate_career_for_user(user, career, weights=None, hours_per_week=DEFAULT_
 # 6. Ranking all careers
 # ==========================================
 def get_top_career_recommendations(user, careers=None, top_n=3, weights=None,
-                                   hours_per_week=DEFAULT_HOURS_PER_WEEK):
+                                   hours_per_week=DEFAULT_HOURS_PER_WEEK,
+                                   scoring_algorithm=algorithms.DEFAULT_SCORING_ALGORITHM,
+                                   path_algorithm=algorithms.DEFAULT_PATH_ALGORITHM):
     """
     Evaluates all careers in the knowledge base for a given user profile.
     Returns the top 'top_n' careers sorted by matching_score (descending).
@@ -855,9 +1022,19 @@ def get_top_career_recommendations(user, careers=None, top_n=3, weights=None,
     if careers is None:
         careers = CAREER_DATABASE
 
+    scoring_algorithm = algorithms.resolve_scoring_algorithm(scoring_algorithm)
+    path_algorithm = algorithms.resolve_path_algorithm(path_algorithm)
+
+    # Built once: the decision tree is walked a single time, and Bayes needs
+    # every career's evidence before any posterior can be normalised.
+    context = build_request_context(user, scoring_algorithm, careers)
+
     results = []
     for career in careers:
-        results.append(evaluate_career_for_user(user, career, weights, hours_per_week))
+        results.append(evaluate_career_for_user(
+            user, career, weights, hours_per_week,
+            scoring_algorithm, path_algorithm, context
+        ))
 
     results.sort(
         key=lambda item: (
@@ -876,7 +1053,9 @@ def get_top_career_recommendations(user, careers=None, top_n=3, weights=None,
     return results[:limit]
 
 
-def recommend_single_career(user, career_id, hours_per_week=DEFAULT_HOURS_PER_WEEK):
+def recommend_single_career(user, career_id, hours_per_week=DEFAULT_HOURS_PER_WEEK,
+                            scoring_algorithm=algorithms.DEFAULT_SCORING_ALGORITHM,
+                            path_algorithm=algorithms.DEFAULT_PATH_ALGORITHM):
     """
     Full evaluation for one specific career chosen by the student, even when it
     is not in their top matches. Powers the "explore any career path" endpoint.
@@ -885,22 +1064,319 @@ def recommend_single_career(user, career_id, hours_per_week=DEFAULT_HOURS_PER_WE
     career = get_career_by_id(career_id)
     if not career:
         return None
-    return evaluate_career_for_user(user, career, hours_per_week=hours_per_week)
+
+    # Bayes posteriors are shares of 100% across every career, so the context
+    # must still be built over the whole catalog even for a single lookup.
+    context = build_request_context(user, scoring_algorithm)
+    return evaluate_career_for_user(
+        user, career, hours_per_week=hours_per_week,
+        scoring_algorithm=scoring_algorithm, path_algorithm=path_algorithm,
+        context=context
+    )
 
 
-def compare_careers(user, career_ids, hours_per_week=DEFAULT_HOURS_PER_WEEK):
+def compare_careers(user, career_ids, hours_per_week=DEFAULT_HOURS_PER_WEEK,
+                    scoring_algorithm=algorithms.DEFAULT_SCORING_ALGORITHM,
+                    path_algorithm=algorithms.DEFAULT_PATH_ALGORITHM):
     """
     Side-by-side comparison of several careers for the same student profile,
     sorted best fit first. Unknown ids are ignored.
     """
+    context = build_request_context(user, scoring_algorithm)
+
     evaluations = []
     for career_id in career_ids or []:
-        evaluation = recommend_single_career(user, career_id, hours_per_week)
-        if evaluation:
-            evaluations.append(evaluation)
+        career = get_career_by_id(career_id)
+        if not career:
+            continue
+        evaluations.append(evaluate_career_for_user(
+            user, career, hours_per_week=hours_per_week,
+            scoring_algorithm=scoring_algorithm, path_algorithm=path_algorithm,
+            context=context
+        ))
 
     evaluations.sort(key=lambda item: -item["matching_score"])
     return evaluations
+
+
+# ==========================================
+# 7. "What if I choose a different algorithm?"
+# ==========================================
+def compare_algorithms(user, hours_per_week=DEFAULT_HOURS_PER_WEEK, top_n=3, careers=None):
+    """
+    Runs every scoring algorithm and every path algorithm over the same
+    profile and reports what changes. This is the answer to "if we choose this
+    one, then what?": the same student, the same knowledge base, three ways of
+    ranking careers and two ways of ordering the learning.
+
+    Returns the per-algorithm rankings, where they agree, and the trade-off
+    each choice implies.
+    """
+    if careers is None:
+        careers = CAREER_DATABASE
+
+    hours_per_week = clamp_hours_per_week(hours_per_week)
+    top_n = max(1, min(int(top_n or 3), len(careers)))
+
+    # --- Scoring algorithms: same evidence, three different rankings ---
+    scoring_results = []
+    rankings = {}
+
+    for entry in ALGORITHM_CATALOG["scoring"]:
+        algorithm_id = entry["id"]
+        ranked = get_top_career_recommendations(
+            user, careers=careers, top_n=top_n, hours_per_week=hours_per_week,
+            scoring_algorithm=algorithm_id,
+            path_algorithm=algorithms.DEFAULT_PATH_ALGORITHM
+        )
+        rankings[algorithm_id] = [item["career_id"] for item in ranked]
+
+        scoring_results.append({
+            "id": algorithm_id,
+            "name": entry["name"],
+            "family": entry["family"],
+            "one_line": entry["one_line"],
+            "score_label": entry["score_label"],
+            "score_scale": entry["score_scale"],
+            "is_default": entry.get("default", False),
+            "strengths": entry["strengths"],
+            "limits": entry["limits"],
+            "top_career": ranked[0]["career_title"] if ranked else "",
+            "top_career_id": ranked[0]["career_id"] if ranked else "",
+            "top_score": ranked[0]["matching_score"] if ranked else 0.0,
+            "ranking": [
+                {
+                    "rank": index + 1,
+                    "career_id": item["career_id"],
+                    "career_title": item["career_title"],
+                    "score": item["matching_score"],
+                    "why": (item["algorithm"]["scoring"]["detail"].get("explanation") or [""])[0]
+                }
+                for index, item in enumerate(ranked)
+            ]
+        })
+
+    # --- Where the three algorithms agree ---
+    top_choices = [result["top_career_id"] for result in scoring_results if result["top_career_id"]]
+    unanimous = len(set(top_choices)) == 1 and len(top_choices) == len(scoring_results)
+
+    all_top_sets = [set(ids) for ids in rankings.values() if ids]
+    shared = set.intersection(*all_top_sets) if all_top_sets else set()
+    shared_titles = [
+        get_career_by_id(career_id)["title"]
+        for career_id in sorted(shared) if get_career_by_id(career_id)
+    ]
+
+    if unanimous:
+        agreement_verdict = (
+            "All three scoring algorithms pick {0} first, so the recommendation is robust: "
+            "it does not depend on which method you trust.".format(scoring_results[0]["top_career"])
+        )
+    else:
+        agreement_verdict = (
+            "The algorithms disagree on first place ({0}). That usually means the profile sits "
+            "between two tracks: MCDA rewards overall coverage, the decision tree follows your "
+            "strongest interest, and Bayes rewards skills that are distinctive to one career.".format(
+                ", ".join(
+                    "{0}: {1}".format(r["name"], r["top_career"]) for r in scoring_results
+                )
+            )
+        )
+
+    # --- Path algorithms, compared on the agreed (or MCDA) top career ---
+    focus_id = scoring_results[0]["top_career_id"] if scoring_results else None
+    focus_career = get_career_by_id(focus_id) if focus_id else None
+
+    path_results = []
+    if focus_career:
+        for entry in ALGORITHM_CATALOG["path"]:
+            evaluation = evaluate_career_for_user(
+                user, focus_career, hours_per_week=hours_per_week,
+                scoring_algorithm=algorithms.DEFAULT_SCORING_ALGORITHM,
+                path_algorithm=entry["id"]
+            )
+            plan = evaluation["career_path"]["learning_plan"]
+            first_phase = plan["phases"][0] if plan["phases"] else {}
+
+            path_results.append({
+                "id": entry["id"],
+                "name": entry["name"],
+                "family": entry["family"],
+                "one_line": entry["one_line"],
+                "phase_label": entry["phase_label"],
+                "is_default": entry.get("default", False),
+                "strengths": entry["strengths"],
+                "limits": entry["limits"],
+                "career_title": focus_career["title"],
+                "total_skills": plan["total_skills_to_learn"],
+                "total_hours": plan["total_learning_hours"],
+                "estimated_weeks": plan["estimated_weeks"],
+                "estimated_duration": plan["estimated_duration"],
+                "phase_count": len(plan["phases"]),
+                "first_group": [item["skill"] for item in first_phase.get("skills", [])],
+                "start_with": plan["start_with"],
+                "skill_sequence": plan["skill_sequence"],
+                "extra": plan.get("bfs", {})
+            })
+
+    path_verdict = ""
+    if len(path_results) == 2:
+        topo, bfs = path_results[0], path_results[1]
+        topo_groups = max(0, topo["phase_count"] - 1)
+        bfs_groups = max(0, bfs["phase_count"] - 1)
+        path_verdict = (
+            "Both plans contain the same {0} skill(s) and the same {1} study hours, so neither is "
+            "faster. They differ in shape: {2} gives {3} difficulty phase{4} in one fixed order, "
+            "while {5} gives {6} dependency level{7} and shows that {8} skill(s) can be started "
+            "today, in parallel.".format(
+                topo["total_skills"], topo["total_hours"],
+                topo["name"], topo_groups, "" if topo_groups == 1 else "s",
+                bfs["name"], bfs_groups, "" if bfs_groups == 1 else "s",
+                len(bfs["first_group"])
+            )
+        )
+
+    # --- The two offered combos, each evaluated as a whole ---
+    # A combo is scored by its own algorithm and its path is built for its own
+    # top career, so this is the honest answer to "if I pick this pair, what
+    # do I actually get?"
+    combo_results = []
+    for combo in ALGORITHM_COMBOS:
+        ranked = get_top_career_recommendations(
+            user, careers=careers, top_n=top_n, hours_per_week=hours_per_week,
+            scoring_algorithm=combo["scoring"], path_algorithm=combo["path"]
+        )
+        if not ranked:
+            continue
+
+        winner = ranked[0]
+        plan = winner["career_path"]["learning_plan"]
+        first_phase = plan["phases"][0] if plan["phases"] else {}
+        scoring_entry = algorithms.algorithm_info(combo["scoring"], "scoring") or {}
+        path_entry = algorithms.algorithm_info(combo["path"], "path") or {}
+
+        combo_results.append({
+            "id": combo["id"],
+            "label": combo["label"],
+            "tagline": combo["tagline"],
+            "best_for": combo["best_for"],
+            "is_default": combo.get("default", False),
+            "scoring": {
+                "id": combo["scoring"],
+                "name": scoring_entry.get("name", combo["scoring"]),
+                "score_label": scoring_entry.get("score_label", "Score"),
+                "score_scale": scoring_entry.get("score_scale", ""),
+                "strengths": scoring_entry.get("strengths", []),
+                "limits": scoring_entry.get("limits", [])
+            },
+            "path": {
+                "id": combo["path"],
+                "name": path_entry.get("name", combo["path"]),
+                "phase_label": path_entry.get("phase_label", "Phase"),
+                "strengths": path_entry.get("strengths", []),
+                "limits": path_entry.get("limits", [])
+            },
+            "top_career": winner["career_title"],
+            "top_career_id": winner["career_id"],
+            "top_score": winner["matching_score"],
+            "mcda_reference_score": winner["algorithm"]["mcda_reference_score"],
+            "ranking": [
+                {
+                    "rank": index + 1,
+                    "career_id": item["career_id"],
+                    "career_title": item["career_title"],
+                    "score": item["matching_score"]
+                }
+                for index, item in enumerate(ranked)
+            ],
+            "plan": {
+                "total_skills": plan["total_skills_to_learn"],
+                "total_hours": plan["total_learning_hours"],
+                "estimated_weeks": plan["estimated_weeks"],
+                "estimated_duration": plan["estimated_duration"],
+                "group_count": max(0, len(plan["phases"]) - 1),
+                "first_group_name": first_phase.get("name", ""),
+                "first_group": [item["skill"] for item in first_phase.get("skills", [])],
+                "start_with": plan["start_with"],
+                "extra": plan.get("bfs", {})
+            }
+        })
+
+    # Do the two combos land on the same career, and do they cost the same?
+    combo_verdict = ""
+    if len(combo_results) == 2:
+        first, second = combo_results
+        same_career = first["top_career_id"] == second["top_career_id"]
+        same_cost = first["plan"]["total_hours"] == second["plan"]["total_hours"]
+
+        if same_career:
+            combo_verdict = (
+                "Both combos pick {0} first, so the recommendation does not depend on which "
+                "pair you trust. ".format(first["top_career"])
+            )
+        else:
+            combo_verdict = (
+                "The combos disagree on first place: {0} picks {1}, {2} picks {3}. That means the "
+                "profile sits between two tracks - {0} rewards overall coverage across all three "
+                "criteria, while {2} follows your single strongest interest down one branch. ".format(
+                    first["label"], first["top_career"], second["label"], second["top_career"]
+                )
+            )
+
+        if same_career and same_cost:
+            combo_verdict += (
+                "The learning content is identical too ({0} skills, {1} hours); only the grouping "
+                "changes: {2} gives {3} difficulty phase{7} in one fixed order, while {4} gives {5} "
+                "dependency level{8} and shows {6} skill(s) you could start today in parallel.".format(
+                    first["plan"]["total_skills"], first["plan"]["total_hours"],
+                    first["path"]["name"], first["plan"]["group_count"],
+                    second["path"]["name"], second["plan"]["group_count"],
+                    len(second["plan"]["first_group"]),
+                    "" if first["plan"]["group_count"] == 1 else "s",
+                    "" if second["plan"]["group_count"] == 1 else "s"
+                )
+            )
+        else:
+            combo_verdict += (
+                "Because they target different careers, the plans differ too: {0} hours for {1} "
+                "against {2} hours for {3}.".format(
+                    first["plan"]["total_hours"], first["top_career"],
+                    second["plan"]["total_hours"], second["top_career"]
+                )
+            )
+
+    return {
+        "profile_summary": {
+            "skills": len(user.get("skills", []) or []),
+            "interests": len(user.get("interests", []) or []),
+            "education": user.get("education", ""),
+            "goal": user.get("career_goal", ""),
+            "hours_per_week": hours_per_week
+        },
+        "combos": combo_results,
+        "combo_verdict": combo_verdict,
+        "scoring_algorithms": scoring_results,
+        "path_algorithms": path_results,
+        "agreement": {
+            "unanimous_top_career": unanimous,
+            "top_choices": [
+                {"algorithm": r["name"], "career": r["top_career"], "score": r["top_score"]}
+                for r in scoring_results
+            ],
+            "shared_in_all_top_lists": shared_titles,
+            "verdict": agreement_verdict
+        },
+        "path_comparison_verdict": path_verdict,
+        "how_to_choose": [
+            "Pick Combo 1 (Weighted MCDA + Topological Sort) for a balanced, explainable fit score and a syllabus-style order. It is the default and the easiest to defend line by line.",
+            "Pick Combo 2 (Decision Tree + Breadth-First Search) when the reasoning matters as much as the number, and when you want to see what can be started today in parallel.",
+            "Pick Weighted MCDA for a balanced, explainable fit score: it is the default and the easiest to defend line by line.",
+            "Pick the Decision Tree when you want to see the reasoning as a path of questions, or when one interest clearly dominates.",
+            "Pick Naive Bayes when you want a probability rather than a score, and want absent skills to count as evidence against a career. Note that it answers 'which career do you resemble today', so an ambitious goal you have barely started will rank lower here than under MCDA.",
+            "Pick Topological Sort for a syllabus-style order, easiest topics first.",
+            "Pick Breadth-First Search when you want to know what can be started today and what each level unlocks."
+        ]
+    }
 
 
 def summarize_skill_demand(careers=None):

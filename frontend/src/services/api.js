@@ -138,13 +138,33 @@ export async function fetchUserProfile(userId) {
 /**
  * 10. Generate ranked career recommendations with generated career paths
  * POST /api/recommend/<user_id>
- * @param {Object} options - { top_n: 3, hours_per_week: 10 }
+ * @param {Object} options - { top_n, hours_per_week, scoring_algorithm, path_algorithm }
  */
 export async function fetchRecommendations(userId, options = {}) {
   return postJson(
     `/api/recommend/${userId}`,
     options,
     'Failed to generate recommendations. Please retry.'
+  );
+}
+
+/**
+ * 10b. Catalog of selectable algorithms (3 scoring, 2 path)
+ * GET /api/algorithms
+ */
+export async function fetchAlgorithmCatalog() {
+  return getJson('/api/algorithms', 'Failed to fetch the algorithm catalog.');
+}
+
+/**
+ * 10c. Run every algorithm on one profile and compare the outcomes
+ * POST /api/compare-algorithms/<user_id>
+ */
+export async function compareAlgorithms(userId, options = {}) {
+  return postJson(
+    `/api/compare-algorithms/${userId}`,
+    options,
+    'Failed to compare the algorithms.'
   );
 }
 

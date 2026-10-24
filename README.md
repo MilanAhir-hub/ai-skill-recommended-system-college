@@ -2,6 +2,18 @@
 
 A complete, full-stack, beginner-friendly application built with **React.js, Tailwind CSS, Python Flask, and SQLite**. The system uses a **rule-based expert system** (traditional explainable AI) to analyze student skills, interests, and educational background, rank career matches, identify skill gaps, and **generate a complete career path**: a prerequisite-ordered, phased learning plan with week-by-week timelines, plus a five-stage role progression ladder.
 
+### Five algorithms, and you choose
+
+The system offers a choice at two independent points, then shows you what each choice would change:
+
+| Pick one to rank careers | Pick one to order the learning |
+| :--- | :--- |
+| **Weighted MCDA** — 50% skills + 30% interests + 20% education *(default)* | **Topological Sort (Kahn)** — dependency order grouped into difficulty phases *(default)* |
+| **Decision Tree** — walks a declared question tree: interests, then strongest skill family, then degree | **Breadth-First Search** — dependency levels: what you can start today, and what each level unlocks |
+| **Naive Bayes** — P(career \| your evidence) from declared priors and likelihoods | |
+
+`POST /api/compare-algorithms/<user_id>` runs all of them on one profile and reports which career each picks, whether they agree, and which choice suits which situation. The originals remain the defaults: a request that names no algorithm behaves exactly as it always did.
+
 **No machine learning model, no training data, no API keys and no external AI service are used anywhere.** Every number the UI shows is produced by deterministic arithmetic and graph traversal over the static knowledge base, so the same input always produces the same output and every result can be traced to a rule.
 
 ## Knowledge base at a glance
@@ -14,7 +26,7 @@ A complete, full-stack, beginner-friendly application built with **React.js, Tai
 | Role progression stages (5 per career) | **105** |
 | Step-by-step roadmap steps | **294** |
 | Career-goal job-title synonyms | **86** |
-| Automated tests | **41** |
+| Automated tests | **56** |
 
 ---
 
@@ -26,11 +38,12 @@ ai-skill-recommended-system-college/
 ├── database.py           # SQLite connection, schema migration, and CRUD helpers
 ├── career_data.py        # Knowledge base: 21 careers, 92 skills, aliases, role ladders
 ├── recommender.py        # Scoring engine, gap analysis, and career path generator
+├── algorithms.py         # The added engines: Decision Tree, Naive Bayes, BFS path
 ├── requirements.txt      # Python dependencies (Flask, flask-cors)
 ├── verify_backend.py     # End-to-end verification script with formatted JSON logs
 ├── README.md             # Comprehensive project documentation
 ├── tests/
-│   └── test_api.py       # 41 automated unit and integration tests using unittest
+│   └── test_api.py       # 56 automated unit and integration tests using unittest
 └── frontend/             # React.js + Tailwind CSS Vite Application
     ├── .env.example      # Example environment variables (VITE_API_BASE_URL)
     ├── .env              # Local development environment configuration
@@ -73,7 +86,7 @@ Open your first terminal in the project root directory:
 # 1. Install backend dependencies
 pip install -r requirements.txt
 
-# 2. Run backend automated tests (41 tests)
+# 2. Run backend automated tests (56 tests)
 python -m unittest discover -s tests
 
 # 3. Start the Flask backend server
@@ -210,6 +223,7 @@ Immediately following the recommendation analysis, the application presents an *
 | :--- | :--- | :--- |
 | `GET` | `/` | API status, knowledge base size and endpoint directory |
 | `GET` | `/api/stats` | Knowledge base counts, algorithm description, most in-demand skills |
+| `GET` | `/api/algorithms` | The 5 selectable algorithms with how each works, strengths and limits |
 | `GET` | `/api/careers` | List all 21 career tracks (`?view=summary`, `?category=Cybersecurity`) |
 | `GET` | `/api/careers/<career_id>` | Full detail and role progression ladder for one career |
 | `GET` | `/api/skills` | 92 skills grouped by category with difficulty, hours, prerequisites |
@@ -217,9 +231,10 @@ Immediately following the recommendation analysis, the application presents an *
 | `GET` | `/api/education-options` | Education dropdown values (kept in sync with scoring keywords) |
 | `POST` | `/api/users` | Create and save user profile in SQLite |
 | `GET` | `/api/users/<id>` | Retrieve saved profile by ID |
-| `POST` | `/api/recommend/<id>` | Ranked recommendations with generated career paths (`top_n`, `hours_per_week`) |
+| `POST` | `/api/recommend/<id>` | Ranked recommendations with generated career paths (`top_n`, `hours_per_week`, `scoring_algorithm`, `path_algorithm`) |
 | `POST` | `/api/career-path/<id>/<career_id>` | Generate the full career path for any chosen career |
 | `POST` | `/api/compare/<id>` | Compare several careers side by side for the same profile |
+| `POST` | `/api/compare-algorithms/<id>` | Run every algorithm on one profile and report what each choice changes |
 | `POST` | `/api/analyze` | Instant analysis without saving a profile |
 
 ### Sample `POST /api/users` Payload
@@ -354,7 +369,7 @@ Immediately following the recommendation analysis, the application presents an *
 ## 📮 How to Test the Application
 
 ### 1. Automated Tests
-Run the 41 automated backend tests (API endpoints, scoring bounds, knowledge base consistency, prerequisite ordering, alias resolution, career path structure):
+Run the 56 automated backend tests (API endpoints, scoring bounds, knowledge base consistency, prerequisite ordering, alias resolution, career path structure):
 ```bash
 python -m unittest discover -s tests
 ```

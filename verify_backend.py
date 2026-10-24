@@ -225,6 +225,123 @@ def run_verification():
     for item in analyze_data["recommendations"]:
         print(f" - {item['career_title']}: {item['matching_score']}% | matched {item['matched_skills']}")
 
+    # -------------------------------------------------------------
+    # 12. Selectable algorithms (the three added engines)
+    # -------------------------------------------------------------
+    print_step("12. Testing GET /api/algorithms (Algorithm Choice)")
+    res = client.get("/api/algorithms")
+    assert res.status_code == 200
+    catalog = res.get_json()
+    print("Scoring algorithms (which career fits?):")
+    for entry in catalog["scoring_algorithms"]:
+        mark = " [DEFAULT]" if entry.get("default") else ""
+        print(f" - {entry['id']:<14} {entry['name']}{mark}")
+        print(f"   {entry['one_line']}")
+    print("\nPath algorithms (how do I get there?):")
+    for entry in catalog["path_algorithms"]:
+        mark = " [DEFAULT]" if entry.get("default") else ""
+        print(f" - {entry['id']:<14} {entry['name']}{mark}")
+        print(f"   {entry['one_line']}")
+    assert catalog["defaults"] == {"scoring": "mcda", "path": "topological"}, \
+        "The original algorithm must remain the default"
+
+    # -------------------------------------------------------------
+    # 13. Same profile scored by every algorithm
+    # -------------------------------------------------------------
+    print_step(f"13. Running every algorithm on user {user_id}")
+    baselines = {}
+    for scoring in ("mcda", "decision_tree", "bayes"):
+        res = client.post(
+            f"/api/recommend/{user_id}",
+            json={"top_n": 3, "scoring_algorithm": scoring}
+        )
+        assert res.status_code == 200
+        data = res.get_json()
+        label = data["algorithm"]["scoring"]["score_label"]
+        print(f"\n{data['algorithm']['scoring']['name']} ({label}):")
+        for item in data["recommendations"]:
+            print(f"   {item['career_title']:<24} {item['matching_score']:>7.2f}")
+
+        scores = [item["matching_score"] for item in data["recommendations"]]
+        assert scores == sorted(scores, reverse=True), "results must stay sorted"
+        assert all(0.0 <= s <= 100.0 for s in scores), "scores must stay in range"
+
+        # The original MCDA figure stays visible whichever algorithm is chosen,
+        # and must be identical for the same career across algorithms.
+        for item in data["recommendations"]:
+            reference = item["algorithm"]["mcda_reference_score"]
+            known = baselines.setdefault(item["career_id"], reference)
+            assert known == reference, (
+                f"MCDA baseline for {item['career_id']} moved between algorithms: "
+                f"{known} vs {reference}"
+            )
+    print(f"\nMCDA baseline unchanged under every algorithm, e.g. "
+          f"{list(baselines.items())[0][0]}: {list(baselines.items())[0][1]}%")
+
+    # Bayes posteriors must be a probability distribution
+    res = client.post(f"/api/recommend/{user_id}", json={"top_n": 21, "scoring_algorithm": "bayes"})
+    total = sum(item["matching_score"] for item in res.get_json()["recommendations"])
+    print(f"Naive Bayes posteriors across all careers sum to: {round(total, 2)}%")
+    assert abs(total - 100.0) < 0.5, "posteriors must sum to 100%"
+
+    # -------------------------------------------------------------
+    # 14. BFS path versus the original topological path
+    # -------------------------------------------------------------
+    print_step("14. Comparing the two path algorithms")
+    plans = {}
+    for path_algorithm in ("topological", "bfs"):
+        res = client.post(
+            f"/api/career-path/{user_id}/ai_ml_engineer",
+            json={"hours_per_week": 12, "path_algorithm": path_algorithm}
+        )
+        assert res.status_code == 200
+        plan = res.get_json()["evaluation"]["career_path"]["learning_plan"]
+        plans[path_algorithm] = plan
+        print(f"\n{path_algorithm}: {plan['total_learning_hours']} hrs, {plan['estimated_duration']}")
+        for phase in plan["phases"]:
+            skills = ", ".join(s["skill"] for s in phase["skills"]) or "portfolio & interview work"
+            print(f"   {phase['name']}: {skills}")
+
+    assert plans["topological"]["total_learning_hours"] == plans["bfs"]["total_learning_hours"], \
+        "both paths must cost the same"
+    assert sorted(plans["topological"]["skill_sequence"]) == sorted(plans["bfs"]["skill_sequence"]), \
+        "both paths must contain the same skills"
+
+    # BFS levels must respect the prerequisite graph
+    level_of = {}
+    for phase in plans["bfs"]["phases"]:
+        for item in phase["skills"]:
+            level_of[item["skill"]] = phase["phase"]
+    for skill, level in level_of.items():
+        for prereq in career_data.get_skill_meta(skill)["prerequisites"]:
+            if prereq in level_of:
+                assert level_of[prereq] < level, f"{prereq} must precede {skill}"
+    bfs_extra = plans["bfs"]["bfs"]
+    print(f"\nBFS: {bfs_extra['levels']} levels, {bfs_extra['parallel_at_level_1']} skill(s) startable today")
+    print(f"Longest prerequisite chain: {' -> '.join(bfs_extra['longest_chain'])}")
+    print("Prerequisite ordering verified across all BFS levels.")
+
+    # -------------------------------------------------------------
+    # 15. "If we choose this one, then what?"
+    # -------------------------------------------------------------
+    print_step(f"15. Testing POST /api/compare-algorithms/{user_id}")
+    res = client.post(f"/api/compare-algorithms/{user_id}", json={"top_n": 3})
+    assert res.status_code == 200
+    comparison = res.get_json()["comparison"]
+
+    print("Scoring algorithms, same profile:")
+    for entry in comparison["scoring_algorithms"]:
+        print(f" - {entry['name']:<16} picks {entry['top_career']:<24} ({entry['top_score']} {entry['score_label']})")
+    print(f"\nAgreement: {comparison['agreement']['verdict']}")
+    print(f"\nPaths: {comparison['path_comparison_verdict']}")
+    print("\nHow to choose:")
+    for line in comparison["how_to_choose"]:
+        print(f" - {line}")
+
+    assert len(comparison["scoring_algorithms"]) == 3
+    assert len(comparison["path_algorithms"]) == 2
+    assert comparison["how_to_choose"], "the comparison must say how to choose"
+
     print_step("ALL VERIFICATION CHECKS PASSED SUCCESSFULLY!")
 
 

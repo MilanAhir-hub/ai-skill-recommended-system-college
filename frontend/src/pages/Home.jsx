@@ -21,9 +21,16 @@ import {
   Flame,
   IndianRupee,
   Search,
-  Layers
+  Layers,
+  Scale,
+  Network,
+  Plus
 } from 'lucide-react';
-import { fetchKnowledgeBaseStats, fetchCareersCatalog } from '../services/api';
+import {
+  fetchKnowledgeBaseStats,
+  fetchCareersCatalog,
+  fetchAlgorithmCatalog
+} from '../services/api';
 
 /* Fallback counters so the page still reads correctly offline */
 const FALLBACK_STATS = {
@@ -32,6 +39,33 @@ const FALLBACK_STATS = {
   total_career_stages: 105,
   total_roadmap_steps: 294,
   total_skill_aliases: 242
+};
+
+/* Shown if the backend is unreachable; the real list comes from /api/algorithms */
+const FALLBACK_COMBOS = [
+  {
+    id: 'balanced',
+    label: 'Combo 1',
+    tagline: 'Balanced scoring, syllabus-style order',
+    scoring: 'mcda',
+    path: 'topological',
+    best_for: 'A fit score you can defend line by line, and one unambiguous next step.'
+  },
+  {
+    id: 'tree-bfs',
+    label: 'Combo 2',
+    tagline: 'Readable decisions, parallel levels',
+    scoring: 'decision_tree',
+    path: 'bfs',
+    best_for: 'Seeing the reasoning as a path of questions, and what you can start today in parallel.'
+  }
+];
+
+const ALGORITHM_ICONS = {
+  mcda: <Scale className="w-4 h-4 text-[#cc785c]" />,
+  decision_tree: <GitBranch className="w-4 h-4 text-[#cc785c]" />,
+  topological: <Layers className="w-4 h-4 text-[#cc785c]" />,
+  bfs: <Network className="w-4 h-4 text-[#cc785c]" />
 };
 
 const PIPELINE = [
@@ -65,6 +99,7 @@ export default function Home({ onGetStarted }) {
   const [stats, setStats] = useState(FALLBACK_STATS);
   const [topSkills, setTopSkills] = useState([]);
   const [careers, setCareers] = useState([]);
+  const [algorithmCatalog, setAlgorithmCatalog] = useState(null);
   const [activeCategory, setActiveCategory] = useState('All');
   const [query, setQuery] = useState('');
 
@@ -85,6 +120,12 @@ export default function Home({ onGetStarted }) {
       })
       .catch((err) => console.warn('Career catalog unavailable:', err.message));
 
+    fetchAlgorithmCatalog()
+      .then((data) => {
+        if (isMounted && data) setAlgorithmCatalog(data);
+      })
+      .catch((err) => console.warn('Algorithm catalog unavailable:', err.message));
+
     return () => { isMounted = false; };
   }, []);
 
@@ -104,6 +145,11 @@ export default function Home({ onGetStarted }) {
       return matchesCategory && matchesQuery;
     });
   }, [careers, activeCategory, query]);
+
+  const combos = algorithmCatalog?.combos?.length ? algorithmCatalog.combos : FALLBACK_COMBOS;
+
+  const findAlgorithm = (family, id) =>
+    (algorithmCatalog?.[family] || []).find((entry) => entry.id === id) || null;
 
   const counters = [
     { value: stats.total_careers, label: 'Career tracks' },
@@ -214,6 +260,97 @@ export default function Home({ onGetStarted }) {
         </div>
       </section>
 
+      {/* The two algorithm combinations */}
+      <section className="max-w-6xl mx-auto px-4">
+        <div className="text-center mb-10 space-y-2">
+          <h2 className="text-3xl font-editorial font-normal text-[#141413]">
+            Two algorithm combinations, your choice
+          </h2>
+          <p className="text-xs text-[#6c6a64] max-w-xl mx-auto leading-relaxed">
+            The same profile and the same knowledge base, reasoned over in two different ways. Each
+            pairs a method for ranking careers with a method for ordering the learning path, and you
+            can switch between them on the dashboard and compare the results side by side.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {combos.map((combo) => {
+            const scoring = findAlgorithm('scoring_algorithms', combo.scoring);
+            const path = findAlgorithm('path_algorithms', combo.path);
+
+            return (
+              <div
+                key={combo.id}
+                className="bg-white border border-[#e6dfd8] rounded-xl p-6 shadow-2xs space-y-4"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="w-8 h-8 rounded-lg bg-[#efe9de] border border-[#e6dfd8] text-[#cc785c] font-mono text-xs font-bold flex items-center justify-center shrink-0">
+                    {combo.label.replace('Combo ', '')}
+                  </span>
+                  <div>
+                    <h3 className="text-lg font-editorial font-normal text-[#141413] leading-snug">
+                      {combo.label}
+                    </h3>
+                    <p className="text-xs text-[#6c6a64] mt-0.5">{combo.tagline}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 bg-[#faf9f5] border border-[#e6dfd8] rounded-lg p-4">
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-7 h-7 rounded-lg bg-white border border-[#e6dfd8] flex items-center justify-center shrink-0">
+                      {ALGORITHM_ICONS[combo.scoring] || <Cpu className="w-4 h-4 text-[#cc785c]" />}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[#141413]">
+                        {scoring?.name || combo.scoring}
+                      </div>
+                      <p className="text-[11px] text-[#6c6a64] leading-relaxed mt-0.5">
+                        {scoring?.one_line}
+                      </p>
+                      <p className="text-[10px] font-mono text-[#8e8b82] mt-1">
+                        ranks the careers
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pl-1">
+                    <Plus className="w-3 h-3 text-[#8e8b82]" />
+                    <span className="h-px flex-1 bg-[#e6dfd8]" />
+                  </div>
+
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-7 h-7 rounded-lg bg-white border border-[#e6dfd8] flex items-center justify-center shrink-0">
+                      {ALGORITHM_ICONS[combo.path] || <Route className="w-4 h-4 text-[#cc785c]" />}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[#141413]">
+                        {path?.name || combo.path}
+                      </div>
+                      <p className="text-[11px] text-[#6c6a64] leading-relaxed mt-0.5">
+                        {path?.one_line}
+                      </p>
+                      <p className="text-[10px] font-mono text-[#8e8b82] mt-1">
+                        orders the learning path
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-xs text-[#55534e] leading-relaxed">
+                  <span className="font-semibold text-[#141413]">Best for: </span>
+                  {combo.best_for}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+
+        <p className="text-[11px] text-[#8e8b82] text-center mt-5 leading-relaxed">
+          Both are deterministic and rule-based: the same input always produces the same output, and
+          every number can be traced back to a rule. Nothing is trained, and no external AI service is called.
+        </p>
+      </section>
+
       {/* What you actually get */}
       <section className="max-w-6xl mx-auto px-4">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -297,7 +434,7 @@ export default function Home({ onGetStarted }) {
 
       {/* Career catalog (Dark Product Chrome) */}
       <section className="max-w-6xl mx-auto px-4 pb-4">
-        <div className="bg-[#181715] text-[#faf9f5] rounded-2xl p-6 sm:p-10 border border-[#252320] shadow-sm">
+        <div className="bg-[#2e2a26] text-[#faf9f5] rounded-2xl p-6 sm:p-10 border border-[#4a443d] shadow-sm">
 
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 mb-7">
             <div className="max-w-xl space-y-1.5">
@@ -307,7 +444,7 @@ export default function Home({ onGetStarted }) {
               <h3 className="text-2xl font-editorial font-normal text-[#faf9f5]">
                 {stats.total_careers} career tracks, each fully mapped
               </h3>
-              <p className="text-xs text-[#a09d96] leading-relaxed">
+              <p className="text-xs text-[#c2bbb0] leading-relaxed">
                 Every track defines its benchmark skills, must-have subset, accepted degrees, entry salary
                 band and a five-stage role ladder.
               </p>
@@ -320,7 +457,7 @@ export default function Home({ onGetStarted }) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search a career or skill..."
-                className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-[#252320] bg-[#1f1e1b] text-xs text-[#faf9f5] placeholder:text-[#6c6a64] focus:outline-hidden focus:border-[#cc785c] transition-colors"
+                className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-[#4a443d] bg-[#3a3530] text-xs text-[#faf9f5] placeholder:text-[#6c6a64] focus:outline-hidden focus:border-[#cc785c] transition-colors"
               />
             </div>
           </div>
@@ -335,7 +472,7 @@ export default function Home({ onGetStarted }) {
                   className={`px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors cursor-pointer ${
                     activeCategory === category
                       ? 'bg-[#cc785c] text-white border-[#cc785c]'
-                      : 'bg-[#1f1e1b] text-[#a09d96] border-[#252320] hover:border-[#383531] hover:text-[#faf9f5]'
+                      : 'bg-[#3a3530] text-[#c2bbb0] border-[#4a443d] hover:border-[#5d554b] hover:text-[#faf9f5]'
                   }`}
                 >
                   {category}
@@ -348,7 +485,7 @@ export default function Home({ onGetStarted }) {
             {visibleCareers.map((career) => (
               <div
                 key={career.id}
-                className="bg-[#1f1e1b] border border-[#252320] p-4 rounded-xl hover:border-[#383531] transition-colors flex flex-col gap-2.5"
+                className="bg-[#3a3530] border border-[#4a443d] p-4 rounded-xl hover:border-[#5d554b] transition-colors flex flex-col gap-2.5"
               >
                 <div className="flex items-start justify-between gap-2">
                   <h4 className="font-medium text-sm text-[#faf9f5] leading-snug">
@@ -361,12 +498,12 @@ export default function Home({ onGetStarted }) {
                   )}
                 </div>
 
-                <p className="text-[11px] text-[#a09d96] font-mono leading-relaxed">
+                <p className="text-[11px] text-[#c2bbb0] font-mono leading-relaxed">
                   {career.required_skills.slice(0, 5).join(', ')}
                   {career.required_skills.length > 5 && ` +${career.required_skills.length - 5}`}
                 </p>
 
-                <div className="mt-auto pt-2 border-t border-[#252320] flex items-center justify-between text-[10px] text-[#8e8b82] font-mono">
+                <div className="mt-auto pt-2 border-t border-[#4a443d] flex items-center justify-between text-[10px] text-[#8e8b82] font-mono">
                   <span className="inline-flex items-center gap-1">
                     <IndianRupee className="w-3 h-3" />
                     {career.entry_salary_inr}
@@ -381,19 +518,19 @@ export default function Home({ onGetStarted }) {
           </div>
 
           {visibleCareers.length === 0 && careers.length > 0 && (
-            <p className="text-xs text-[#a09d96] italic py-6 text-center">
+            <p className="text-xs text-[#c2bbb0] italic py-6 text-center">
               No track matches "{query}". Try a skill name like "python" or "figma".
             </p>
           )}
 
           {careers.length === 0 && (
-            <p className="text-xs text-[#a09d96] italic py-6 text-center">
+            <p className="text-xs text-[#c2bbb0] italic py-6 text-center">
               Start the Flask backend to load the live career catalog.
             </p>
           )}
 
-          <div className="mt-8 pt-6 border-t border-[#252320] flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-xs text-[#a09d96]">
+          <div className="mt-8 pt-6 border-t border-[#4a443d] flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-xs text-[#c2bbb0]">
               Ready to see which of these {stats.total_careers} tracks fits you, and exactly how to get there?
             </p>
             <button

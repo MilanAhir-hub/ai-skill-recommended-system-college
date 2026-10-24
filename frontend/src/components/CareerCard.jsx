@@ -3,7 +3,7 @@
  * -------------------------
  * Career recommendation card styled according to DESIGN.md.
  * Alternates between warm cream cards (#efe9de / #ffffff) and dark product
- * mockup surfaces (#181715) for technical roadmap steps.
+ * mockup surfaces (#2e2a26) for technical roadmap steps.
  */
 
 import React, { useState } from 'react';
@@ -32,6 +32,11 @@ export default function CareerCard({ career, rank = 1 }) {
   const missingSkills = career.missing_skills || [];
   const matchedSkills = career.matched_skills || [];
   const impliedSkills = career.implied_skills || [];
+  const algorithm = career.algorithm || null;
+  const scoringAlgo = algorithm?.scoring || null;
+  const isAlternativeAlgorithm = scoringAlgo && scoringAlgo.id !== 'mcda';
+  const scoreLabel = scoringAlgo?.score_label || 'Match';
+  const algoExplanation = scoringAlgo?.detail?.explanation || [];
   const careerPath = career.career_path || null;
   const plan = careerPath?.learning_plan || null;
   const market = careerPath?.market_insights || {};
@@ -79,16 +84,21 @@ export default function CareerCard({ career, rank = 1 }) {
             )}
           </div>
 
-          {/* Match Score */}
+          {/* Score, labelled by whichever algorithm produced it */}
           <div className="text-right">
             <div className="flex items-baseline justify-end gap-1">
               <span className="text-3xl font-editorial font-normal text-[#141413]">
                 {score}%
               </span>
               <span className="text-[11px] font-semibold text-[#8e8b82] uppercase tracking-wider">
-                Match
+                {scoreLabel}
               </span>
             </div>
+            {isAlternativeAlgorithm && (
+              <div className="text-[10px] font-mono text-[#8e8b82] mt-0.5">
+                {scoringAlgo.name} &middot; MCDA baseline {algorithm.mcda_reference_score}%
+              </div>
+            )}
           </div>
         </div>
 
@@ -185,6 +195,29 @@ export default function CareerCard({ career, rank = 1 }) {
           </div>
         </div>
 
+        {/* How the selected algorithm reached this score */}
+        {isAlternativeAlgorithm && algoExplanation.length > 0 && (
+          <div className="bg-[#f5f0e8] rounded-xl border border-[#cc785c]/40 p-4 mb-4 space-y-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#cc785c] flex items-center gap-1.5">
+              <Cpu className="w-3.5 h-3.5" />
+              {scoringAlgo.name} &middot; how this {scoreLabel.toLowerCase()} was reached
+            </span>
+            <ol className="text-xs text-[#3d3d3a] space-y-1.5">
+              {algoExplanation.map((line, idx) => (
+                <li key={idx} className="flex items-start gap-2 leading-relaxed">
+                  <span className="font-mono text-[#8e8b82] text-[10px] mt-0.5 shrink-0">
+                    {idx + 1}.
+                  </span>
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ol>
+            <p className="text-[10px] text-[#6c6a64] pt-1 border-t border-[#e6dfd8]">
+              {scoringAlgo.score_scale}
+            </p>
+          </div>
+        )}
+
         {/* AI Algo Analysis Box for This Career */}
         <div className="bg-[#faf9f5] rounded-xl border border-[#e6dfd8] p-4 mb-6 space-y-2.5">
           <div className="flex items-center justify-between">
@@ -193,7 +226,7 @@ export default function CareerCard({ career, rank = 1 }) {
               AI Algo:- Skill Gap & Heuristic Match
             </span>
             <span className="text-[10px] font-mono font-medium text-[#8e8b82]">
-              {score}% Match
+              {score}% {scoreLabel}
             </span>
           </div>
           <ul className="text-xs text-[#55534e] space-y-1.5 pl-0.5">

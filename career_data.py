@@ -2610,7 +2610,319 @@ CAREER_GOAL_ALIASES = {
 
 
 # ==========================================
-# 6. Derived Lookups (computed once at import)
+# 6. Algorithm Catalog and Parameters
+# ==========================================
+# The system offers four interchangeable rule-based algorithms. The student
+# (or examiner) picks one scoring algorithm and one path algorithm; the same
+# normalised profile is then fed through the chosen pair. Every algorithm here
+# is deterministic and reads its knowledge from this file: none of them is
+# trained, and none calls an external service.
+
+ALGORITHM_CATALOG = {
+    "scoring": [
+        {
+            "id": "mcda",
+            "name": "Weighted MCDA",
+            "family": "Multi-Criteria Decision Analysis (Simple Additive Weighting)",
+            "one_line": "Scores every career as 50% skills + 30% interests + 20% education.",
+            "score_label": "Fit score",
+            "score_scale": "0-100 weighted fit, directly comparable between careers",
+            "how_it_works": [
+                "Measures three criteria independently on a 0-1 scale.",
+                "Core (must-have) skills count double against supporting skills.",
+                "Multiplies each criterion by its fixed weight and adds them.",
+                "Adds a 5-point bonus when the career matches the stated goal."
+            ],
+            "strengths": [
+                "Every point in the score can be traced to one criterion",
+                "Smooth, continuous ranking with no sharp cut-offs",
+                "Weights can be re-tuned without touching the engine"
+            ],
+            "limits": [
+                "The 50/30/20 weights are asserted, not learned",
+                "Treats criteria as independent, so it cannot express rules like 'design interest only matters with design skills'"
+            ],
+            "default": True
+        },
+        {
+            "id": "decision_tree",
+            "name": "Decision Tree",
+            "family": "Rule-based classification tree",
+            "one_line": "Walks a declared question tree: interests, then strongest skill family, then degree.",
+            "score_label": "Confidence",
+            "score_scale": "0-100 confidence, highest for careers at the matched leaf",
+            "how_it_works": [
+                "Asks which interest group the profile points to and takes that branch.",
+                "Asks which skill family is strongest inside that branch.",
+                "Reaches a leaf holding the candidate careers for that combination.",
+                "Scores leaf careers highest, branch siblings next, everything else low, then adjusts for the degree."
+            ],
+            "strengths": [
+                "Produces a human-readable decision path, like a counsellor's reasoning",
+                "Naturally rules careers in or out instead of scoring everything close together",
+                "Easy for a non-technical examiner to follow and audit"
+            ],
+            "limits": [
+                "Hard splits: one dominant interest can send a borderline profile down the wrong branch",
+                "Careers outside the matched leaf are separated by a visible gap"
+            ],
+            "default": False
+        },
+        {
+            "id": "bayes",
+            "name": "Naive Bayes",
+            "family": "Bayes' theorem with declared (not learned) probabilities",
+            "one_line": "Computes P(career | your evidence) from declared priors and likelihoods.",
+            "score_label": "Posterior probability",
+            "score_scale": "0-100% probability, summing to 100% across all 21 careers",
+            "how_it_works": [
+                "Starts from a prior per career, derived from its declared market demand.",
+                "Treats every skill in the career's benchmark as present/absent evidence.",
+                "Multiplies the likelihood of each piece of evidence given that career, in log space.",
+                "Normalises the posteriors so the 21 careers sum to 100%."
+            ],
+            "strengths": [
+                "Gives a genuine probability, so uncertainty is visible",
+                "Absence of a required skill counts as evidence against, not just a missing bonus",
+                "Discriminative: a skill unique to one career moves that career much more"
+            ],
+            "limits": [
+                "Probabilities are expert-declared constants, not measured frequencies",
+                "Assumes evidence is conditionally independent, which skills are not",
+                "Scores look lower than MCDA because they are shares of 100% across 21 careers",
+                "Answers 'which career does this profile most resemble today', so a student aiming at a role they have barely started will score lower on it than their stated goal suggests"
+            ],
+            "default": False
+        }
+    ],
+    "path": [
+        {
+            "id": "topological",
+            "name": "Topological Sort (Kahn)",
+            "family": "Dependency ordering with difficulty phases",
+            "one_line": "Orders every gap skill behind its prerequisites, then groups by difficulty.",
+            "phase_label": "Phase",
+            "how_it_works": [
+                "Closes the gap set over the prerequisite graph, adding bridge skills.",
+                "Runs Kahn's algorithm, breaking ties by difficulty, then hours, then name.",
+                "Groups skills into Foundations, Core and Specialisation by difficulty.",
+                "Pushes a skill later if a prerequisite landed in a later phase."
+            ],
+            "strengths": [
+                "Phases read like a syllabus: easy topics first, hard topics last",
+                "One single order, so there is never a question of what to do next"
+            ],
+            "limits": [
+                "Hides which skills could be learned at the same time",
+                "A long easy skill can delay a short critical one"
+            ],
+            "default": True
+        },
+        {
+            "id": "bfs",
+            "name": "Breadth-First Search",
+            "family": "Level-order traversal of the prerequisite graph",
+            "one_line": "Groups skills into dependency levels: what you can start now, and what each level unlocks.",
+            "phase_label": "Level",
+            "how_it_works": [
+                "Level 1 holds every skill whose prerequisites are already satisfied.",
+                "Removing a level reveals the next frontier, which becomes Level 2.",
+                "Repeats until every needed skill has a level.",
+                "Also records each skill's BFS depth: the length of its shortest prerequisite chain."
+            ],
+            "strengths": [
+                "Shows exactly what can be started today, and what is unlocked by finishing it",
+                "Skills inside one level are independent, so they can be learned in parallel",
+                "Makes the shortest chain to a hard skill visible (Linux to Docker to MLOps)"
+            ],
+            "limits": [
+                "A level can mix an easy skill with a hard one",
+                "More levels than phases, so the plan looks longer even when it is not"
+            ],
+            "default": False
+        }
+    ]
+}
+
+# The two combinations offered in the interface. Each pairs one way of ranking
+# careers with one way of ordering the learning path, so the student makes one
+# choice instead of four. The individual algorithms above stay available
+# through the API; these are the ready-made pairings.
+ALGORITHM_COMBOS = [
+    {
+        "id": "balanced",
+        "label": "Combo 1",
+        "tagline": "Balanced scoring, syllabus-style order",
+        "scoring": "mcda",
+        "path": "topological",
+        "best_for": "A fit score you can defend line by line, and one unambiguous next step.",
+        "default": True
+    },
+    {
+        "id": "tree-bfs",
+        "label": "Combo 2",
+        "tagline": "Readable decisions, parallel levels",
+        "scoring": "decision_tree",
+        "path": "bfs",
+        "best_for": "Seeing the reasoning as a path of questions, and what you can start today in parallel.",
+        "default": False
+    }
+]
+
+
+# ------------------------------------------
+# 6a. Decision tree (declared, not learned)
+# ------------------------------------------
+# A two-question classification tree. Question 1 branches on the interest group
+# the profile points to; question 2 branches on the strongest skill family
+# inside that branch; the leaf holds the candidate careers. Written as data so
+# a domain expert can re-shape the tree without touching the traversal code.
+DECISION_TREE = {
+    "node": "root",
+    "attribute": "interest_group",
+    "question": "Which domain do your interests point to?",
+    "branches": {
+        "Engineering & Building": {
+            "attribute": "skill_category",
+            "question": "Which skill family is strongest?",
+            "branches": {
+                "Web & Frontend": {"leaf": ["frontend_developer", "web_developer"]},
+                "Backend & APIs": {"leaf": ["backend_developer", "software_developer"]},
+                "Mobile Development": {"leaf": ["mobile_app_developer"]},
+                "Databases": {"leaf": ["backend_developer", "database_administrator"]},
+                "Quality & Testing": {"leaf": ["qa_automation_engineer"]},
+                "Cloud & DevOps": {"leaf": ["devops_engineer", "backend_developer"]},
+                "_default": {"leaf": ["software_developer", "backend_developer"]}
+            }
+        },
+        "Web, Mobile & Design": {
+            "attribute": "skill_category",
+            "question": "Which skill family is strongest?",
+            "branches": {
+                "Design & UX": {"leaf": ["ui_ux_designer"]},
+                "Web & Frontend": {"leaf": ["frontend_developer", "web_developer"]},
+                "Mobile Development": {"leaf": ["mobile_app_developer"]},
+                "Backend & APIs": {"leaf": ["web_developer", "backend_developer"]},
+                "_default": {"leaf": ["web_developer", "ui_ux_designer"]}
+            }
+        },
+        "Data & AI": {
+            "attribute": "skill_category",
+            "question": "Which skill family is strongest?",
+            "branches": {
+                "AI & Machine Learning": {"leaf": ["ai_ml_engineer", "data_scientist"]},
+                "Data Engineering": {"leaf": ["data_engineer"]},
+                "Data & Analytics": {"leaf": ["data_analyst", "data_scientist"]},
+                "Databases": {"leaf": ["data_engineer", "database_administrator"]},
+                "Computer Science Fundamentals": {"leaf": ["data_scientist", "ai_ml_engineer"]},
+                "_default": {"leaf": ["data_analyst", "data_scientist"]}
+            }
+        },
+        "Infrastructure & Security": {
+            "attribute": "skill_category",
+            "question": "Which skill family is strongest?",
+            "branches": {
+                "Cybersecurity": {"leaf": ["cybersecurity_analyst"]},
+                "Cloud & DevOps": {"leaf": ["devops_engineer", "cloud_engineer"]},
+                "Computer Science Fundamentals": {"leaf": ["network_engineer", "cloud_engineer"]},
+                "Databases": {"leaf": ["database_administrator", "cloud_engineer"]},
+                "_default": {"leaf": ["cloud_engineer", "network_engineer"]}
+            }
+        },
+        "Business & Product": {
+            "attribute": "skill_category",
+            "question": "Which skill family is strongest?",
+            "branches": {
+                "Business & Product": {"leaf": ["business_analyst", "product_manager"]},
+                "Data & Analytics": {"leaf": ["data_analyst", "business_analyst"]},
+                "Quality & Testing": {"leaf": ["qa_automation_engineer", "business_analyst"]},
+                "_default": {"leaf": ["business_analyst", "product_manager"]}
+            }
+        },
+        "Emerging & Specialised": {
+            "attribute": "skill_category",
+            "question": "Which skill family is strongest?",
+            "branches": {
+                "Game Development": {"leaf": ["game_developer"]},
+                "Blockchain & Web3": {"leaf": ["blockchain_developer"]},
+                "Hardware & Embedded": {"leaf": ["embedded_iot_engineer"]},
+                "Programming Languages": {"leaf": ["game_developer", "embedded_iot_engineer"]},
+                "_default": {"leaf": ["embedded_iot_engineer", "blockchain_developer"]}
+            }
+        },
+        "_default": {
+            "attribute": "skill_category",
+            "question": "No interests selected, so which skill family is strongest?",
+            "branches": {
+                "AI & Machine Learning": {"leaf": ["ai_ml_engineer", "data_scientist"]},
+                "Data & Analytics": {"leaf": ["data_analyst"]},
+                "Web & Frontend": {"leaf": ["frontend_developer", "web_developer"]},
+                "Backend & APIs": {"leaf": ["backend_developer"]},
+                "Cybersecurity": {"leaf": ["cybersecurity_analyst"]},
+                "Cloud & DevOps": {"leaf": ["devops_engineer", "cloud_engineer"]},
+                "Design & UX": {"leaf": ["ui_ux_designer"]},
+                "Hardware & Embedded": {"leaf": ["embedded_iot_engineer"]},
+                "_default": {"leaf": ["software_developer", "web_developer"]}
+            }
+        }
+    }
+}
+
+# Scores awarded by the decision tree, by how the career was reached.
+DECISION_TREE_SCORES = {
+    "leaf_base": 55.0,          # career sits at the matched leaf
+    "leaf_coverage": 45.0,      # plus this much times its skill coverage
+    "branch_base": 32.0,        # career appears elsewhere under the same branch
+    "branch_coverage": 34.0,
+    "other_base": 8.0,          # career was not reached by the tree at all
+    "other_coverage": 30.0,
+    "education_bonus": 8.0,     # degree matches the track's declared keywords
+    "education_penalty": -8.0   # degree is unrelated to the track
+}
+
+# ------------------------------------------
+# 6b. Naive Bayes parameters (declared, not learned)
+# ------------------------------------------
+# P(career | evidence) is proportional to P(career) times the product of
+# P(evidence | career). Every probability below is an expert-declared constant:
+# nothing is estimated from user data, so the result is reproducible.
+BAYES_PARAMS = {
+    # Prior weight per declared market demand, normalised across careers.
+    "demand_prior": {"Very High": 1.40, "High": 1.15, "Moderate": 1.00},
+
+    # P(student has skill | career is right) for skills in the benchmark set.
+    "p_core_skill_present": 0.90,
+    "p_required_skill_present": 0.72,
+
+    # P(student has skill | career is right) for a skill outside the benchmark.
+    "p_unrelated_skill_present": 0.14,
+
+    # Interests declared relevant by the career, and those outside it.
+    "p_relevant_interest": 0.85,
+    "p_unrelated_interest": 0.20,
+
+    # Education evidence, keyed by the education heuristic's own output.
+    "p_education": {"domain": 0.88, "general": 0.55, "other": 0.28, "missing": 0.50},
+
+    # Goal evidence: the student naming this career is strong but not decisive.
+    "p_goal_named": 0.80,
+    "p_goal_other": 0.22,
+
+    # Laplace smoothing so no single piece of evidence can zero a posterior.
+    "smoothing": 0.02,
+
+    # Correction for the "naive" assumption. Naive Bayes multiplies every piece
+    # of evidence as if it were independent, but skills are strongly correlated
+    # (a student with React almost always has JavaScript and CSS too). Counting
+    # them as independent over-states the evidence and drives the posterior to
+    # 100% for one career and 0% for the rest. Damping the log-likelihood by
+    # this factor keeps the ranking while leaving a readable spread.
+    "evidence_damping": 0.35
+}
+
+
+# ==========================================
+# 7. Derived Lookups (computed once at import)
 # ==========================================
 # Backwards-compatible roadmap map: {skill_name: [step, step, ...]}
 SKILL_ROADMAPS = {
@@ -2638,7 +2950,7 @@ SKILL_LOOKUP_LOWER = {name.lower(): name for name in SKILL_LIBRARY}
 
 
 # ==========================================
-# 7. Knowledge Base Helpers
+# 8. Knowledge Base Helpers
 # ==========================================
 def canonical_skill(raw_skill):
     """
@@ -2837,5 +3149,87 @@ def validate_knowledge_base():
             problems.append("Goal alias '{0}' points to unknown career '{1}'".format(alias, career_id))
         if alias != alias.lower():
             problems.append("Goal alias '{0}' must be lowercase to be matched".format(alias))
+
+    # Decision tree: every branch must name a real interest group / skill
+    # category, and every leaf must list real careers.
+    for group, node in DECISION_TREE["branches"].items():
+        if group != "_default" and group not in INTEREST_LIBRARY:
+            problems.append("Decision tree branches on unknown interest group '{0}'".format(group))
+        for category, child in node.get("branches", {}).items():
+            if category != "_default" and category not in SKILL_CATEGORIES:
+                problems.append(
+                    "Decision tree branch '{0}' uses unknown skill category '{1}'".format(group, category)
+                )
+            for career_id in child.get("leaf", []):
+                if career_id not in CAREER_INDEX:
+                    problems.append(
+                        "Decision tree leaf under '{0}/{1}' names unknown career '{2}'".format(
+                            group, category, career_id
+                        )
+                    )
+        if "_default" not in node.get("branches", {}):
+            problems.append("Decision tree branch '{0}' has no _default leaf".format(group))
+
+    # Every interest group must be reachable from the tree root
+    for group in INTEREST_LIBRARY:
+        if group not in DECISION_TREE["branches"]:
+            problems.append("Interest group '{0}' has no decision tree branch".format(group))
+
+    # Bayes probabilities must be usable in a product of likelihoods
+    for key, value in BAYES_PARAMS.items():
+        values = value.values() if isinstance(value, dict) else [value]
+        for item in values:
+            if not isinstance(item, (int, float)) or not (0.0 < item <= 2.0):
+                problems.append("Bayes parameter '{0}' has an out-of-range value: {1}".format(key, item))
+
+    for demand in {c.get("demand", "Moderate") for c in CAREER_DATABASE}:
+        if demand not in BAYES_PARAMS["demand_prior"]:
+            problems.append("No Bayes prior declared for demand level '{0}'".format(demand))
+
+    # The offered combos must name real algorithms, and exactly one is default
+    scoring_ids = {entry["id"] for entry in ALGORITHM_CATALOG.get("scoring", [])}
+    path_ids = {entry["id"] for entry in ALGORITHM_CATALOG.get("path", [])}
+
+    if sum(1 for combo in ALGORITHM_COMBOS if combo.get("default")) != 1:
+        problems.append("Exactly one algorithm combo must be marked as the default")
+
+    for combo in ALGORITHM_COMBOS:
+        if combo["scoring"] not in scoring_ids:
+            problems.append(
+                "Combo '{0}' names unknown scoring algorithm '{1}'".format(combo["id"], combo["scoring"])
+            )
+        if combo["path"] not in path_ids:
+            problems.append(
+                "Combo '{0}' names unknown path algorithm '{1}'".format(combo["id"], combo["path"])
+            )
+        for field in ("label", "tagline", "best_for"):
+            if not combo.get(field):
+                problems.append("Combo '{0}' is missing field '{1}'".format(combo["id"], field))
+
+    # The default combo must be the pair the engine falls back to
+    default_combo = next((c for c in ALGORITHM_COMBOS if c.get("default")), None)
+    if default_combo:
+        default_scoring = next((a["id"] for a in ALGORITHM_CATALOG["scoring"] if a.get("default")), None)
+        default_path = next((a["id"] for a in ALGORITHM_CATALOG["path"] if a.get("default")), None)
+        if default_combo["scoring"] != default_scoring or default_combo["path"] != default_path:
+            problems.append(
+                "The default combo must pair the default algorithms ({0} + {1})".format(
+                    default_scoring, default_path
+                )
+            )
+
+    # Algorithm catalog must be complete enough for the UI to render a picker
+    for family in ("scoring", "path"):
+        entries = ALGORITHM_CATALOG.get(family, [])
+        if not entries:
+            problems.append("Algorithm catalog has no '{0}' algorithms".format(family))
+        if sum(1 for entry in entries if entry.get("default")) != 1:
+            problems.append("Algorithm family '{0}' must declare exactly one default".format(family))
+        for entry in entries:
+            for field in ("id", "name", "family", "one_line", "how_it_works", "strengths", "limits"):
+                if not entry.get(field):
+                    problems.append(
+                        "Algorithm '{0}' is missing field '{1}'".format(entry.get("id", "?"), field)
+                    )
 
     return problems

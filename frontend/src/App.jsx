@@ -4,7 +4,7 @@
  * Main entry point and page router for CareerCompass AI.
  * Styled with Claude's warm editorial design language:
  * Cream canvas (#faf9f5), Newsreader serif typography, coral CTAs (#cc785c),
- * and dark navy grounding footer (#181715).
+ * and dark navy grounding footer (#2e2a26).
  */
 
 import React, { useState } from 'react';
@@ -75,55 +75,114 @@ export default function App() {
         )}
       </main>
 
-      {/* Dark Footer from DESIGN.md (#181715) */}
-      <footer className="border-t border-[#252320] bg-[#181715] text-[#a09d96] py-12 mt-16 text-xs">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-          
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-2.5">
-              <div className="w-6 h-6 rounded-md bg-[#252320] flex items-center justify-center text-[#cc785c]">
-                <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-                  <path d="M12 2L13.8 8.8L20.6 7L15.8 12L20.6 17L13.8 15.2L12 22L10.2 15.2L3.4 17L8.2 12L3.4 7L10.2 8.8L12 2Z" />
-                </svg>
+      {/* Dark Footer from DESIGN.md (#2e2a26) */}
+      <footer className="border-t border-[#4a443d] bg-[#2e2a26] text-[#c2bbb0] py-14 mt-16 text-xs">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
+
+          {/* Three columns: what it is, where to go, how it works */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-10">
+
+            {/* Brand + description */}
+            <div className="lg:col-span-2 space-y-3">
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-base font-bold text-[#faf9f5] tracking-tight">
+                  CareerCompass
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[#cc785c] px-1.5 py-0.5 rounded-full bg-[#4a443d] border border-[#5d554b]">
+                  AI
+                </span>
               </div>
-              <span className="font-bold text-sm text-[#faf9f5] tracking-tight">
-                CareerCompass AI
-              </span>
-              <span className="text-[#8e8b82] text-[11px] font-mono">
-                v2.0
-              </span>
+              <p className="text-[11px] leading-relaxed max-w-sm text-[#c2bbb0]">
+                An AI-powered personalized career and skill recommendation system. It scores your
+                profile against every career track, finds the exact skill gaps, and generates a
+                prerequisite-ordered learning path with real week-by-week timelines.
+              </p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] font-mono text-[#6c6a64] pt-1">
+                <span>21 career tracks</span>
+                <span>92 skills mapped</span>
+                <span>105 role stages</span>
+              </div>
             </div>
 
-            <div className="flex items-center gap-4 text-[11px] text-[#8e8b82]">
-              <button 
-                onClick={() => setActivePage('home')} 
-                className="hover:text-[#faf9f5] transition-colors cursor-pointer"
-              >
-                Overview
-              </button>
-              <button 
-                onClick={() => setActivePage('profile')} 
-                className="hover:text-[#faf9f5] transition-colors cursor-pointer"
-              >
-                Profile Form
-              </button>
-              {currentUserId && (
-                <button 
-                  onClick={() => setActivePage('dashboard')} 
-                  className="hover:text-[#faf9f5] transition-colors cursor-pointer"
-                >
-                  Dashboard
-                </button>
-              )}
+            {/* Navigation */}
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-[#faf9f5]">
+                Navigate
+              </h3>
+              <ul className="space-y-2 text-[11px]">
+                <li>
+                  <button
+                    onClick={() => setActivePage('home')}
+                    className="hover:text-[#faf9f5] transition-colors cursor-pointer"
+                  >
+                    Overview
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => setActivePage('profile')}
+                    className="hover:text-[#faf9f5] transition-colors cursor-pointer"
+                  >
+                    Build your profile
+                  </button>
+                </li>
+                <li>
+                  <button
+                    onClick={() => setActivePage('dashboard')}
+                    className="hover:text-[#faf9f5] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    disabled={!currentUserId}
+                  >
+                    Dashboard
+                  </button>
+                </li>
+              </ul>
+            </div>
+
+            {/* The engine */}
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-[#faf9f5]">
+                The engine
+              </h3>
+              <ul className="space-y-2.5 text-[11px]">
+                <li>
+                  <span className="block text-[#faf9f5]">Combo 1</span>
+                  <span className="block text-[10px] font-mono text-[#6c6a64] leading-relaxed">
+                    Weighted MCDA + Topological Sort
+                  </span>
+                </li>
+                <li>
+                  <span className="block text-[#faf9f5]">Combo 2</span>
+                  <span className="block text-[10px] font-mono text-[#6c6a64] leading-relaxed">
+                    Decision Tree + Breadth-First Search
+                  </span>
+                </li>
+              </ul>
+              <p className="text-[10px] text-[#6c6a64] leading-relaxed">
+                Rule-based and deterministic. No trained model, no API keys.
+              </p>
             </div>
           </div>
 
-          <div className="pt-6 border-t border-[#252320] flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-[#6c6a64]">
+          {/* Team */}
+          <div className="pt-8 border-t border-[#4a443d] space-y-2">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wider text-[#faf9f5]">
+              Submitted by
+            </h3>
+            <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-[11px] text-[#c2bbb0]">
+              <span>Yash Parmar</span>
+              <span>Milan Gagiya</span>
+              <span>Hiren Jalondhra</span>
+              <span>Vrutik Sotha</span>
+            </div>
+          </div>
+
+          {/* Bottom bar */}
+          <div className="pt-6 border-t border-[#4a443d] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-[10px] text-[#6c6a64]">
             <p>
-              AI-Powered Personalized Career and Skill Recommendation System • College Project
+              AI-Powered Personalized Career and Skill Recommendation System &middot; College Project
             </p>
-            <p className="font-mono text-[10px]">
-              Rule-Based Expert Heuristics (50% Skills • 30% Interests • 20% Education) + Prerequisite Graph Paths
+            <p className="font-mono">
+              50% Skills &middot; 30% Interests &middot; 20% Education
             </p>
           </div>
 

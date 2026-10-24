@@ -31,6 +31,10 @@ from career_data import (
     INTEREST_LIBRARY,
     EDUCATION_OPTIONS,
     ALL_INTERESTS,
+    ALGORITHM_CATALOG,
+    ALGORITHM_COMBOS,
+    DECISION_TREE,
+    BAYES_PARAMS,
     DEFAULT_HOURS_PER_WEEK,
     get_career_by_id,
     knowledge_base_stats,
@@ -41,11 +45,13 @@ from recommender import (
     get_top_career_recommendations,
     recommend_single_career,
     compare_careers,
+    compare_algorithms,
     summarize_skill_demand,
     clamp_hours_per_week,
 )
+import algorithms
 
-API_VERSION = "2.0.0"
+API_VERSION = "3.0.0"
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -123,6 +129,53 @@ def resolve_hours_per_week(payload, user=None):
     return clamp_hours_per_week(raw)
 
 
+def resolve_algorithms(payload):
+    """
+    Reads the chosen algorithms from the request body or query string and falls
+    back to the original defaults (Weighted MCDA + topological sort) whenever
+    the caller asks for nothing, or asks for something unknown.
+    """
+    scoring = payload.get("scoring_algorithm", request.args.get("scoring_algorithm"))
+    path = payload.get("path_algorithm", request.args.get("path_algorithm"))
+    return (
+        algorithms.resolve_scoring_algorithm(scoring),
+        algorithms.resolve_path_algorithm(path)
+    )
+
+
+def algorithm_echo(scoring_algorithm, path_algorithm):
+    """The algorithm block echoed back on every scored response."""
+    scoring = algorithms.algorithm_info(scoring_algorithm, "scoring") or {}
+    path = algorithms.algorithm_info(path_algorithm, "path") or {}
+    return {
+        "scoring": {
+            "id": scoring_algorithm,
+            "name": scoring.get("name", scoring_algorithm),
+            "family": scoring.get("family", ""),
+            "one_line": scoring.get("one_line", ""),
+            "score_label": scoring.get("score_label", "Score"),
+            "score_scale": scoring.get("score_scale", ""),
+            "how_it_works": scoring.get("how_it_works", [])
+        },
+        "path": {
+            "id": path_algorithm,
+            "name": path.get("name", path_algorithm),
+            "family": path.get("family", ""),
+            "one_line": path.get("one_line", ""),
+            "phase_label": path.get("phase_label", "Phase"),
+            "how_it_works": path.get("how_it_works", [])
+        },
+        "defaults": {
+            "scoring": algorithms.DEFAULT_SCORING_ALGORITHM,
+            "path": algorithms.DEFAULT_PATH_ALGORITHM
+        },
+        "using_defaults": (
+            scoring_algorithm == algorithms.DEFAULT_SCORING_ALGORITHM
+            and path_algorithm == algorithms.DEFAULT_PATH_ALGORITHM
+        )
+    }
+
+
 def career_summary(career):
     """Lighter career record for list views and the catalog UI."""
     return {
@@ -192,6 +245,14 @@ def index():
         "message": "AI-Powered Personalized Career and Skill Recommendation API is running",
         "version": API_VERSION,
         "engine": "Rule-based expert system (no ML model, no external API)",
+        "algorithms": {
+            "scoring": [a["id"] for a in ALGORITHM_CATALOG["scoring"]],
+            "path": [a["id"] for a in ALGORITHM_CATALOG["path"]],
+            "defaults": {
+                "scoring": algorithms.DEFAULT_SCORING_ALGORITHM,
+                "path": algorithms.DEFAULT_PATH_ALGORITHM
+            }
+        },
         "knowledge_base": {
             "careers": stats["total_careers"],
             "skills": stats["total_skills"],
@@ -207,9 +268,11 @@ def index():
             "GET /api/education-options": "Education dropdown options",
             "POST /api/users": "Create and save a user profile",
             "GET /api/users/<user_id>": "Retrieve a saved user profile",
-            "POST /api/recommend/<user_id>": "Top career recommendations with generated career paths",
+            "GET /api/algorithms": "The selectable algorithms: 3 scoring, 2 path, with strengths and limits",
+            "POST /api/recommend/<user_id>": "Top career recommendations with generated career paths (accepts scoring_algorithm, path_algorithm)",
             "POST /api/career-path/<user_id>/<career_id>": "Generate the career path for any chosen career",
             "POST /api/compare/<user_id>": "Compare several careers side by side",
+            "POST /api/compare-algorithms/<user_id>": "Run every algorithm on one profile and report what changes",
             "POST /api/analyze": "Instant analysis without saving a profile"
         }
     }), 200
@@ -470,6 +533,7 @@ def recommend_for_user(user_id):
 
     payload = get_request_payload()
     hours_per_week = resolve_hours_per_week(payload, user)
+    scoring_algorithm, path_algorithm = resolve_algorithms(payload)
 
     raw_top_n = payload.get("top_n", request.args.get("top_n", 3))
     try:
@@ -479,7 +543,8 @@ def recommend_for_user(user_id):
     top_n = max(1, min(top_n, len(CAREER_DATABASE)))
 
     recommendations = get_top_career_recommendations(
-        user, top_n=top_n, hours_per_week=hours_per_week
+        user, top_n=top_n, hours_per_week=hours_per_week,
+        scoring_algorithm=scoring_algorithm, path_algorithm=path_algorithm
     )
 
     return jsonify({
@@ -492,6 +557,7 @@ def recommend_for_user(user_id):
         "careers_evaluated": len(CAREER_DATABASE),
         "total_recommendations": len(recommendations),
         "scoring_weights": MATCH_WEIGHTS,
+        "algorithm": algorithm_echo(scoring_algorithm, path_algorithm),
         "ai_algo": AI_ALGO_INFO,
         "recommendations": recommendations
     }), 200
@@ -513,8 +579,12 @@ def career_path_for_user(user_id, career_id):
 
     payload = get_request_payload()
     hours_per_week = resolve_hours_per_week(payload, user)
+    scoring_algorithm, path_algorithm = resolve_algorithms(payload)
 
-    evaluation = recommend_single_career(user, career_id, hours_per_week=hours_per_week)
+    evaluation = recommend_single_career(
+        user, career_id, hours_per_week=hours_per_week,
+        scoring_algorithm=scoring_algorithm, path_algorithm=path_algorithm
+    )
     if not evaluation:
         return jsonify({
             "status": "error",
@@ -526,6 +596,7 @@ def career_path_for_user(user_id, career_id):
         "user_id": user["id"],
         "user_name": user["name"],
         "hours_per_week": hours_per_week,
+        "algorithm": algorithm_echo(scoring_algorithm, path_algorithm),
         "evaluation": evaluation
     }), 200
 
@@ -554,7 +625,11 @@ def compare_for_user(user_id):
         }), 400
 
     hours_per_week = resolve_hours_per_week(payload, user)
-    evaluations = compare_careers(user, career_ids, hours_per_week=hours_per_week)
+    scoring_algorithm, path_algorithm = resolve_algorithms(payload)
+    evaluations = compare_careers(
+        user, career_ids, hours_per_week=hours_per_week,
+        scoring_algorithm=scoring_algorithm, path_algorithm=path_algorithm
+    )
 
     if not evaluations:
         return jsonify({
@@ -566,6 +641,7 @@ def compare_for_user(user_id):
         "status": "success",
         "user_id": user["id"],
         "hours_per_week": hours_per_week,
+        "algorithm": algorithm_echo(scoring_algorithm, path_algorithm),
         "total_compared": len(evaluations),
         "comparisons": evaluations
     }), 200
@@ -612,6 +688,7 @@ def analyze_profile():
     }
 
     hours_per_week = resolve_hours_per_week(data)
+    scoring_algorithm, path_algorithm = resolve_algorithms(data)
 
     try:
         top_n = int(data.get("top_n", 3))
@@ -620,7 +697,8 @@ def analyze_profile():
     top_n = max(1, min(top_n, len(CAREER_DATABASE)))
 
     recommendations = get_top_career_recommendations(
-        profile, top_n=top_n, hours_per_week=hours_per_week
+        profile, top_n=top_n, hours_per_week=hours_per_week,
+        scoring_algorithm=scoring_algorithm, path_algorithm=path_algorithm
     )
 
     return jsonify({
@@ -630,8 +708,79 @@ def analyze_profile():
         "hours_per_week": hours_per_week,
         "careers_evaluated": len(CAREER_DATABASE),
         "total_recommendations": len(recommendations),
+        "algorithm": algorithm_echo(scoring_algorithm, path_algorithm),
         "ai_algo": AI_ALGO_INFO,
         "recommendations": recommendations
+    }), 200
+
+
+# ==========================================
+# 6. Algorithm choice and comparison
+# ==========================================
+@app.route("/api/algorithms", methods=["GET"])
+def get_algorithms():
+    """
+    GET /api/algorithms
+    The catalog of selectable algorithms: three ways to score careers and two
+    ways to order the learning path, with how each one works, what it is good
+    at and where it falls short. Powers the algorithm picker in the UI.
+    """
+    return jsonify({
+        "status": "success",
+        "defaults": {
+            "scoring": algorithms.DEFAULT_SCORING_ALGORITHM,
+            "path": algorithms.DEFAULT_PATH_ALGORITHM
+        },
+        "combos": ALGORITHM_COMBOS,
+        "scoring_algorithms": ALGORITHM_CATALOG["scoring"],
+        "path_algorithms": ALGORITHM_CATALOG["path"],
+        "knowledge": {
+            "decision_tree_questions": [
+                DECISION_TREE["question"],
+                "Which skill family is strongest?"
+            ],
+            "decision_tree_branches": sorted(
+                b for b in DECISION_TREE["branches"] if b != "_default"
+            ),
+            "bayes_parameters": BAYES_PARAMS
+        }
+    }), 200
+
+
+@app.route("/api/compare-algorithms/<int:user_id>", methods=["POST", "GET"])
+def compare_algorithms_for_user(user_id):
+    """
+    POST /api/compare-algorithms/<user_id>
+    Runs every algorithm over the same profile and reports what changes:
+    which career each scoring algorithm puts first, whether they agree, how
+    the two path algorithms shape the same set of skills, and which choice
+    suits which situation. This answers "if we choose this one, then what?".
+    """
+    user = get_user_by_id(user_id)
+    if not user:
+        return jsonify({
+            "status": "error",
+            "message": "User with ID {0} was not found.".format(user_id)
+        }), 404
+
+    payload = get_request_payload()
+    hours_per_week = resolve_hours_per_week(payload, user)
+
+    try:
+        top_n = int(payload.get("top_n", request.args.get("top_n", 3)))
+    except (TypeError, ValueError):
+        top_n = 3
+    top_n = max(1, min(top_n, len(CAREER_DATABASE)))
+
+    comparison = compare_algorithms(user, hours_per_week=hours_per_week, top_n=top_n)
+
+    return jsonify({
+        "status": "success",
+        "user_id": user["id"],
+        "user_name": user["name"],
+        "hours_per_week": hours_per_week,
+        "careers_evaluated": len(CAREER_DATABASE),
+        "comparison": comparison
     }), 200
 
 

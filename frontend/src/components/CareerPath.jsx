@@ -8,7 +8,7 @@
  *   4. Next actions      - what to literally do this week
  *
  * Styled with the DESIGN.md tokens: cream surfaces (#faf9f5 / #efe9de),
- * coral accents (#cc785c) and dark product surfaces (#181715) for the
+ * coral accents (#cc785c) and dark product surfaces (#2e2a26) for the
  * technical roadmap steps.
  */
 
@@ -92,10 +92,10 @@ function SkillBlock({ item }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="bg-[#181715] text-[#faf9f5] rounded-lg border border-[#252320] overflow-hidden">
+    <div className="bg-[#2e2a26] text-[#faf9f5] rounded-lg border border-[#4a443d] overflow-hidden">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-start justify-between gap-3 p-3 text-left hover:bg-[#1f1e1b] transition-colors cursor-pointer"
+        className="w-full flex items-start justify-between gap-3 p-3 text-left hover:bg-[#3a3530] transition-colors cursor-pointer"
       >
         <div className="min-w-0 space-y-1.5">
           <div className="flex items-center gap-2 flex-wrap">
@@ -109,7 +109,7 @@ function SkillBlock({ item }) {
               </span>
             )}
             {item.is_bridge_skill && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#252320] text-[#a09d96] border border-[#383531] inline-flex items-center gap-1">
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#4a443d] text-[#c2bbb0] border border-[#5d554b] inline-flex items-center gap-1">
                 <Link2 className="w-2.5 h-2.5" />
                 Prerequisite
               </span>
@@ -127,9 +127,9 @@ function SkillBlock({ item }) {
       </button>
 
       {open && (
-        <div className="px-3 pb-3 space-y-3 border-t border-[#252320] pt-3">
+        <div className="px-3 pb-3 space-y-3 border-t border-[#4a443d] pt-3">
           {item.prerequisites?.length > 0 && (
-            <p className="text-[11px] text-[#a09d96] font-mono">
+            <p className="text-[11px] text-[#c2bbb0] font-mono">
               Requires first: {item.prerequisites.join(', ')}
             </p>
           )}
@@ -146,13 +146,13 @@ function SkillBlock({ item }) {
           </ol>
 
           {item.resources?.length > 0 && (
-            <div className="pt-2 border-t border-[#252320]">
+            <div className="pt-2 border-t border-[#4a443d]">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8e8b82] mb-1.5">
                 Free resources
               </p>
               <ul className="space-y-1">
                 {item.resources.map((resource, idx) => (
-                  <li key={idx} className="text-[11px] text-[#a09d96] flex items-start gap-1.5">
+                  <li key={idx} className="text-[11px] text-[#c2bbb0] flex items-start gap-1.5">
                     <span className="text-[#cc785c]">-</span>
                     <span>{resource}</span>
                   </li>
